@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from typing import Any, Dict, Type, Union
 from urllib import parse, request
 
@@ -253,6 +254,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
         ###
         # BACK TO THE FRAMEWORK
         ###
+        constructed = None
         try:
             progress_callback = PrintedProgress()
             if args.quiet:
@@ -264,15 +266,88 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
                 vollog.debug("Writing out configuration data to config.json")
                 with open("config.json", "w") as f:
                     json.dump(dict(constructed.build_configuration()), f, sort_keys = True, indent = 2)
-
-            # Construct and run the plugin
-            renderers[args.renderer]().render(constructed.run())
         except exceptions.UnsatisfiedException as excp:
-            self.process_exceptions(excp)
+            self.process_unsatisfied_exceptions(excp)
             parser.exit(1, "Unable to validate the plugin requirements: {}\n".format([x for x in excp.unsatisfied]))
 
+        try:
+            # Construct and run the plugin
+            if constructed:
+                renderers[args.renderer]().render(constructed.run())
+        except (exceptions.InvalidAddressException) as excp:
+            self.process_exceptions(excp)
+
     def process_exceptions(self, excp):
-        """Provide useful feedback if an exception occurs."""
+        """Provide useful feedback if an exception occurs during a run of a plugin."""
+        # Ensure there's nothing in the cache
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        # Log the full exception at a high level for easy access
+        fulltrace = traceback.TracebackException.from_exception(excp).format(chain = True)
+        vollog.debug("".join(fulltrace))
+
+        if isinstance(excp, exceptions.InvalidAddressException):
+            general = "Volatility was unable to read a requested page:"
+            if isinstance(excp, exceptions.SwappedInvalidAddressException):
+                detail = "Swap error {} in layer {} ({})".format(hex(excp.invalid_address), excp.layer_name, excp)
+                caused_by = [
+                    "No suitable swap file having been provided (locate and provide the correct swap file)",
+                    "An intentionally invalid page (operating system protection)"
+                ]
+            elif isinstance(excp, exceptions.PagedInvalidAddressException):
+                detail = "Page error {} in layer {} ({})".format(hex(excp.invalid_address), excp.layer_name, excp)
+                caused_by = [
+                    "Memory smear during acquisition (try re-acquiring if possible)",
+                    "An intentionally invalid page lookup (operating system protection)",
+                    "A bug in the plugin/volatility (re-run with -vvv and file a bug)"
+                ]
+            else:
+                detail = "{} in layer {} ({})".format(hex(excp.invalid_address), excp.layer_name, excp)
+                caused_by = [
+                    "The base memory file being incomplete (try re-acquiring if possible)",
+                    "Memory smear during acquisition (try re-acquiring if possible)",
+                    "An intentionally invalid page lookup (operating system protection)",
+                    "A bug in the plugin/volatility (re-run with -vvv and file a bug)"
+                ]
+        elif isinstance(excp, exceptions.SymbolError):
+            general = "Volatility experienced a symbol-related issue:"
+            detail = "{}{}{}: {}".format(excp.table_name, constants.BANG, excp.symbol_name, excp)
+            caused_by = [
+                "An invalid symbol table"
+                "A plugin requesting a bad symbol"
+                "A plugin requesting a symbol from the wrong table"
+            ]
+        elif isinstance(excp, exceptions.SymbolSpaceError):
+            general = "Volatility experienced an issue related to a symbol table:"
+            detail = "{}".format(excp)
+            caused_by = [
+                "An invalid symbol table", "A plugin requesting a bad symbol"
+                "A plugin requesting a symbol from the wrong table"
+            ]
+        elif isinstance(excp, exceptions.LayerException):
+            general = "Volatility experienced a layer-related issue: {}".format(excp.layer_name)
+            detail = "{}".format(excp)
+            caused_by = ["A faulty layer implementation (re-run with -vvv and file a bug)"]
+        else:
+            general = "Volatilty encountered an unexpected situation."
+            detail = ""
+            caused_by = [
+                "Please re-run using with -vvv and file a bug with the output", "at {}".format(constants.BUG_URL)
+            ]
+
+        # Code that actually renders the exception
+        output = sys.stderr
+        output.write(general + "\n")
+        output.write(detail + "\n\n")
+        for cause in caused_by:
+            output.write("\t* " + cause + "\n")
+        output.write("\nNo further results will be produced\n")
+        sys.exit(1)
+
+    def process_unsatisfied_exceptions(self, excp):
+        """Provide useful feedback if an exception occurs during requirement fulfillment."""
         # Add a blank newline
         print("")
         translation_failed = False
@@ -318,7 +393,8 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
                         if isinstance(value, str):
                             if not parse.urlparse(value).scheme:
                                 if not os.path.exists(value):
-                                    raise TypeError("Non-existant file {} passed to URIRequirement".format(value))
+                                    raise FileNotFoundError(
+                                        "Non-existant file {} passed to URIRequirement".format(value))
                                 value = "file://" + request.pathname2url(os.path.abspath(value))
                     if isinstance(requirement, requirements.ListRequirement):
                         if not isinstance(value, list):
@@ -335,7 +411,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
     def consume_file(self, filedata: interfaces.plugins.FileInterface):
         """Consumes a file as produced by a plugin."""
         if self.output_dir is None:
-            raise ValueError("Output directory has not been correctly specified")
+            raise TypeError("Output directory is not a string")
         os.makedirs(self.output_dir, exist_ok = True)
 
         pref_name_array = filedata.preferred_filename.split('.')
