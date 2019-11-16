@@ -16,8 +16,6 @@ class VmwareFormatException(exceptions.LayerException):
 
 
 class VmwareLayer(segmented.SegmentedLayer):
-    priority = 22
-
     header_structure = "<4sII"
     group_structure = "64sQQ"
 
@@ -113,6 +111,8 @@ class VmwareLayer(segmented.SegmentedLayer):
 
 
 class VmwareStacker(interfaces.automagic.StackerLayerInterface):
+
+    stack_order = 20
 
     @classmethod
     def stack(cls,
