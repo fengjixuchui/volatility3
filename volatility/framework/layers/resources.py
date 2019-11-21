@@ -13,7 +13,8 @@ import ssl
 import urllib.parse
 import urllib.request
 import zipfile
-from typing import Optional
+from typing import Optional, Any
+from urllib import error
 
 from volatility import framework
 from volatility.framework import constants
@@ -40,6 +41,8 @@ class ResourceAccessor(object):
     """Object for openning URLs as files (downloading locally first if
     necessary)"""
 
+    list_handlers = True
+
     def __init__(self,
                  progress_callback: Optional[constants.ProgressCallback] = None,
                  context: Optional[ssl.SSLContext] = None) -> None:
@@ -50,14 +53,35 @@ class ResourceAccessor(object):
         self._progress_callback = progress_callback
         self._context = context
         self._handlers = list(framework.class_subclasses(urllib.request.BaseHandler))
-        vollog.log(constants.LOGLEVEL_VVV,
-                   "Available URL handlers: {}".format(", ".join([x.__name__ for x in self._handlers])))
+        if self.list_handlers:
+            vollog.log(constants.LOGLEVEL_VVV,
+                       "Available URL handlers: {}".format(", ".join([x.__name__ for x in self._handlers])))
+            self.__class__.list_handlers = False
 
-    def open(self, url, mode = "rb"):
-        """Returns a file-like object for a particular URL opened in mode."""
+    # Current urllib.request.urlopen returns Any, so we do the same
+    def open(self, url: str, mode: str = "rb") -> Any:
+        """Returns a file-like object for a particular URL opened in mode.
+
+        If the file is remote, it will be downloaded and locally cached
+        """
         urllib.request.install_opener(urllib.request.build_opener(*self._handlers))
 
-        with contextlib.closing(urllib.request.urlopen(url, context = self._context)) as fp:
+        try:
+            fp = urllib.request.urlopen(url, context = self._context)
+        except error.URLError as excp:
+            if excp.args:
+                if isinstance(excp.args[0], ssl.SSLCertVerificationError):
+                    vollog.warning("SSL certificate verification failed: attempting UNVERIFIED retrieval")
+                    non_verifying_ctx = ssl.SSLContext()
+                    non_verifying_ctx.check_hostname = False
+                    non_verifying_ctx.verify_mode = ssl.CERT_NONE
+                    fp = urllib.request.urlopen(url, context = non_verifying_ctx)
+                else:
+                    raise excp
+            else:
+                raise excp
+
+        with contextlib.closing(fp) as fp:
             # Cache the file locally
             parsed_url = urllib.parse.urlparse(url)
 
@@ -87,7 +111,7 @@ class ResourceAccessor(object):
                         if not block:
                             break
                         if self._progress_callback:
-                            self._progress_callback(count / max(count, int(content_length)),
+                            self._progress_callback(count * 100 / max(count, int(content_length)),
                                                     "Reading file {}".format(url))
                         cache_file.write(block)
                     cache_file.close()
@@ -156,7 +180,7 @@ class JarHandler(urllib.request.BaseHandler):
     """
 
     @staticmethod
-    def default_open(req):
+    def default_open(req: urllib.request.Request) -> Optional[Any]:
         """Handles the request if it's the jar scheme."""
         if req.type == 'jar':
             subscheme, remainder = req.full_url.split(":")[1], ":".join(req.full_url.split(":")[2:])
