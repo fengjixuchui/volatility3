@@ -19,6 +19,7 @@ vollog = logging.getLogger(__name__)
 
 
 # TODO: When python3.5 is no longer supported, make this enum.IntFlag
+# Revisit the page_type signature of PoolConstraint once using enum.IntFlag
 class PoolType(enum.IntEnum):
     """Class to maintain the different possible PoolTypes The values must be
     integer powers of 2."""
@@ -36,7 +37,7 @@ class PoolConstraint:
                  tag: bytes,
                  type_name: str,
                  object_type: Optional[str] = None,
-                 page_type: Optional[PoolType] = None,
+                 page_type: Optional[int] = None,
                  size: Optional[Tuple[Optional[int], Optional[int]]] = None,
                  index: Optional[Tuple[Optional[int], Optional[int]]] = None,
                  alignment: Optional[int] = 1) -> None:
@@ -398,7 +399,7 @@ class PoolScanner(plugins.PluginInterface):
         constraint_lookup = {}  # type: Dict[bytes, PoolConstraint]
         for constraint in pool_constraints:
             if constraint.tag in constraint_lookup:
-                raise ValueError("Constraint tag is used for more than one constraint: {}".format(constraint.tag))
+                raise ValueError("Constraint tag is used for more than one constraint: {}".format(repr(constraint.tag)))
             constraint_lookup[constraint.tag] = constraint
 
         module = cls._get_pool_header_module(context, layer_name, symbol_table)

@@ -14,6 +14,7 @@ import multiprocessing
 import threading
 import traceback
 from abc import ABCMeta, abstractmethod
+from multiprocessing import managers
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 from volatility.framework import constants, exceptions, interfaces
@@ -29,7 +30,7 @@ try:
 except ImportError:
     pass
 
-ProgressValue = Union['DummyProgress', multiprocessing.Value]
+ProgressValue = Union['DummyProgress', managers.ValueProxy]
 IteratorValue = Tuple[List[Tuple[str, int, int]], int]
 
 
@@ -465,7 +466,7 @@ class TranslationLayerInterface(DataLayerInterface, metaclass = ABCMeta):
 
                 # Prev offset keeps track of the end of the previous subchunk
                 prev_offset = chunk_start
-                output = []
+                output = []  # type: List[Tuple[str, int, int]]
                 # We populate the response based on subchunks that may be mapped all over the place
                 for mapped in self.mapping(chunk_start, chunk_length, ignore_errors = True):
                     offset, mapped_offset, length, layer_name = mapped
