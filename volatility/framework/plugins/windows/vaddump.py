@@ -47,7 +47,7 @@ class VadDump(interfaces.plugins.PluginInterface):
         proc_layer = context.layers[layer_name]
         chunk_size = 1024 * 1024 * 10
         offset = vad.get_start()
-        out_of_range = vad.get_start() + vad.get_end()
+        out_of_range = vad.get_end()
         # print("walking from {:x} to {:x} | {:x}".format(offset, out_of_range, out_of_range-offset))
         while offset < out_of_range:
             to_read = min(chunk_size, out_of_range - offset)
@@ -76,8 +76,6 @@ class VadDump(interfaces.plugins.PluginInterface):
                 vollog.debug("Process {}: invalid address {} in layer {}".format(proc_id, excp.invalid_address,
                                                                                  excp.layer_name))
                 continue
-
-            proc_layer = self.context.layers[proc_layer_name]
 
             for vad in vadinfo.VadInfo.list_vads(proc, filter_func = filter_func):
                 try:
