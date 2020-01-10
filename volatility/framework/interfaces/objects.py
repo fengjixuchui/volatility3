@@ -63,7 +63,8 @@ class ObjectInformation(ReadOnlyMapping):
                  offset: int,
                  member_name: Optional[str] = None,
                  parent: Optional['ObjectInterface'] = None,
-                 native_layer_name: Optional[str] = None):
+                 native_layer_name: Optional[str] = None,
+                 size: Optional[int] = None):
         """Constructs a container for basic information about an object.
 
         Args:
@@ -72,13 +73,15 @@ class ObjectInformation(ReadOnlyMapping):
             member_name: If the object was accessed as a member of a parent object, this was the name used to access it
             parent: If the object was accessed as a member of a parent object, this is the parent object
             native_layer_name: If this object references other objects (such as a pointer), what layer those objects live in
+            size: The size that the whole structure consumes in bytes
         """
         super().__init__({
             'layer_name': layer_name,
             'offset': offset,
             'member_name': member_name,
             'parent': parent,
-            'native_layer_name': native_layer_name or layer_name
+            'native_layer_name': native_layer_name or layer_name,
+            'size': size
         })
 
 
@@ -160,7 +163,8 @@ class ObjectInterface(metaclass = ABCMeta):
                                         offset = self.vol.offset,
                                         member_name = self.vol.member_name,
                                         parent = self.vol.parent,
-                                        native_layer_name = self.vol.native_layer_name)
+                                        native_layer_name = self.vol.native_layer_name,
+                                        size = object_template.size)
         return object_template(context = self._context, object_info = object_info)
 
     def has_member(self, member_name: str) -> bool:
