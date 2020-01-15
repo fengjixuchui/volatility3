@@ -18,6 +18,8 @@ vollog = logging.getLogger(__name__)
 class ProcDump(interfaces.plugins.PluginInterface):
     """Dumps process executable images."""
 
+    _version = (1, 1, 0)
+
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
         # Since we're calling the plugin, make sure we have the plugin's requirements
@@ -32,6 +34,38 @@ class ProcDump(interfaces.plugins.PluginInterface):
             requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
         ]
 
+    @classmethod
+    def process_dump(cls, context: interfaces.context.ContextInterface, kernel_table_name: str, pe_table_name: str,
+                     proc: interfaces.objects.ObjectInterface) -> interfaces.plugins.FileInterface:
+        """Extracts the complete data for a process as a FileInterface
+
+        Args:
+            context: the context to operate upon
+            kernel_table_name: the name for the symbol table containing the kernel's symbols
+            pe_table_name: the name for the symbol table containing the PE format symbols
+            proc: the process object whose memory should be output
+
+        Returns:
+            A FileInterface object containing the complete data for the process
+        """
+
+        proc_id = "Unknown"
+        proc_id = proc.UniqueProcessId
+        proc_layer_name = proc.add_process_layer()
+        peb = context.object(kernel_table_name + constants.BANG + "_PEB",
+                             layer_name = proc_layer_name,
+                             offset = proc.Peb)
+        dos_header = context.object(pe_table_name + constants.BANG + "_IMAGE_DOS_HEADER",
+                                    offset = peb.ImageBaseAddress,
+                                    layer_name = proc_layer_name)
+        filedata = interfaces.plugins.FileInterface("pid.{0}.{1:#x}.dmp".format(proc.UniqueProcessId,
+                                                                                peb.ImageBaseAddress))
+        for offset, data in dos_header.reconstruct():
+            filedata.data.seek(offset)
+            filedata.data.write(data)
+
+        return filedata
+
     def _generator(self, procs):
 
         pe_table_name = intermed.IntermediateSymbolTable.create(self.context,
@@ -41,34 +75,14 @@ class ProcDump(interfaces.plugins.PluginInterface):
                                                                 class_types = pe.class_types)
 
         for proc in procs:
-            process_name = utility.array_to_string(proc.ImageFileName)
-
-            proc_id = "Unknown"
             try:
                 proc_id = proc.UniqueProcessId
-                proc_layer_name = proc.add_process_layer()
-
-                peb = self._context.object(self.config["nt_symbols"] + constants.BANG + "_PEB",
-                                           layer_name = proc_layer_name,
-                                           offset = proc.Peb)
-
-                dos_header = self.context.object(pe_table_name + constants.BANG + "_IMAGE_DOS_HEADER",
-                                                 offset = peb.ImageBaseAddress,
-                                                 layer_name = proc_layer_name)
-
-                filedata = interfaces.plugins.FileInterface("pid.{0}.{1:#x}.dmp".format(
-                    proc.UniqueProcessId, peb.ImageBaseAddress))
-
-                for offset, data in dos_header.reconstruct():
-                    filedata.data.seek(offset)
-                    filedata.data.write(data)
-
+                process_name = utility.array_to_string(proc.ImageFileName)
+                filedata = self.process_dump(self.context, self.config["nt_symbols"], pe_table_name, proc)
                 self.produce_file(filedata)
                 result_text = "Stored {}".format(filedata.preferred_filename)
-
             except ValueError:
                 result_text = "PE parsing error"
-
             except exceptions.SwappedInvalidAddressException as exp:
                 result_text = "Process {}: Required memory at {:#x} is inaccessible (swapped)".format(
                     proc_id, exp.invalid_address)

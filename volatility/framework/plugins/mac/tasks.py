@@ -37,7 +37,7 @@ class Tasks(pslist.PsList):
         mac.MacUtilities.aslr_mask_symbol_table(context, darwin_symbols, layer_name)
 
         kernel = contexts.Module(context, darwin_symbols, layer_name, 0)
-        
+
         kernel_as = context.layers[layer_name]
 
         queue_entry = kernel.object_from_symbol(symbol_name = "tasks")
@@ -54,9 +54,6 @@ class Tasks(pslist.PsList):
                 proc = task.bsd_info.dereference().cast("proc")
             except exceptions.PagedInvalidAddressException:
                 continue
-            
-            if not filter_func(proc) and kernel_as.is_valid(proc.vol.offset, proc.vol.size):
+
+            if kernel_as.is_valid(proc.vol.offset, proc.vol.size) and not filter_func(proc):
                 yield proc
-
-
-
