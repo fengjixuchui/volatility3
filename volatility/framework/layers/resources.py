@@ -70,7 +70,11 @@ class ResourceAccessor(object):
             fp = urllib.request.urlopen(url, context = self._context)
         except error.URLError as excp:
             if excp.args:
-                if isinstance(excp.args[0], ssl.SSLCertVerificationError):
+                # TODO: As of python3.7 this can be removed
+                unverified_retrieval = (hasattr(ssl, "SSLCertVerificationError") and isinstance(
+                    excp.args[0], ssl.SSLCertVerificationError)) or (isinstance(excp.args[0], ssl.SSLError) and
+                                                                     excp.args[0].reason == "CERTIFICATE_VERIFY_FAILED")
+                if unverified_retrieval:
                     vollog.warning("SSL certificate verification failed: attempting UNVERIFIED retrieval")
                     non_verifying_ctx = ssl.SSLContext()
                     non_verifying_ctx.check_hostname = False
@@ -92,7 +96,7 @@ class ResourceAccessor(object):
                 # TODO: find a way to check if we already have this file (look at http headers?)
                 block_size = 1028 * 8
                 temp_filename = os.path.join(constants.CACHE_PATH,
-                                             "data_" + hashlib.sha512(bytes(url, 'latin-1')).hexdigest())
+                                             "data_" + hashlib.sha512(bytes(url, 'latin-1')).hexdigest() + ".cache")
 
                 if not os.path.exists(temp_filename):
                     vollog.debug("Caching file at: {}".format(temp_filename))
