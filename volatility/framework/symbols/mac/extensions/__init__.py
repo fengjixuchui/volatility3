@@ -4,7 +4,7 @@
 
 from typing import Generator, Iterable, Optional, Set, Tuple
 
-from volatility.framework import constants, objects
+from volatility.framework import constants, objects, renderers
 from volatility.framework import exceptions, interfaces
 from volatility.framework.objects import utility
 from volatility.framework.renderers import conversion
@@ -388,20 +388,50 @@ class queue_entry(objects.StructType):
                   member_name: str,
                   type_name: str,
                   max_size: int = 4096) -> Iterable[interfaces.objects.ObjectInterface]:
+        """
+        Walks a queue in a smear-aware and smear-resistant manner
+
+        smear is detected by:
+            - the max_size parameter sets an upper bound
+            - each seen entry is only allowed once
+
+        attempts to work around smear:
+            - the list is walked in both directions to help find as many elements as possible
+
+        Args:
+            list_head   - the head of the list
+            member_name - the name of the embedded list member
+            type_name   - the type of each element in the list
+            max_size    - the maximum amount of elements that will be returned
+
+        Returns:
+            Each instance of the queue cast as "type_name" type
+        """
+
         yielded = 0
+
+        seen = set()
 
         for attr in ['next', 'prev']:
             try:
                 n = getattr(self, attr).dereference().cast(type_name)
+
                 while n is not None and n.vol.offset != list_head:
+                    if n.vol.offset in seen:
+                        break
+
                     yield n
+
+                    seen.add(n.vol.offset)
+
                     yielded = yielded + 1
                     if yielded == max_size:
                         return
+ 
                     n = getattr(n.member(attr = member_name), attr).dereference().cast(type_name)
+
             except exceptions.InvalidAddressException:
                 pass
-
 
 class ifnet(objects.StructType):
 
@@ -464,3 +494,59 @@ class sockaddr(objects.StructType):
             ip = str(addr_dl)
 
         return ip
+
+
+class sysctl_oid(objects.StructType):
+
+    def get_perms(self) -> str:
+        """
+        Returns the actions allowed on the node
+
+        Args: None
+
+        Returns:
+            A combination of:
+                R - readable 
+                W - writeable
+                L - self handles locking
+        """
+        ret = ""
+
+        checks = [0x80000000, 0x40000000, 0x00800000]
+        perms = ["R", "W", "L"]
+
+        for (i, c) in enumerate(checks):
+            if c & self.oid_kind:
+                ret = ret + perms[i]
+            else:
+                ret = ret + "-"
+
+        return ret
+
+    def get_ctltype(self) -> str:
+        """
+        Returns the type of the sysctl node
+
+        Args: None
+
+        Returns:
+            One of:
+                CTLTYPE_NODE
+                CTLTYPE_INT
+                CTLTYPE_STRING
+                CTLTYPE_QUAD
+                CTLTYPE_OPAQUE
+                an empty string for nodes not in the above types
+
+        Based on sysctl_sysctl_debug_dump_node
+        """
+        types = {1: 'CTLTYPE_NODE', 2: 'CTLTYPE_INT', 3: 'CTLTYPE_STRING', 4: 'CTLTYPE_QUAD', 5: 'CTLTYPE_OPAQUE'}
+
+        ctltype = self.oid_kind & 0xf
+
+        if 0 < ctltype < 6:
+            ret = types[ctltype]
+        else:
+            ret = ""
+
+        return ret
