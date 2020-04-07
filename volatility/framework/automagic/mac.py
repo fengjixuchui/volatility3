@@ -214,9 +214,25 @@ class MacUtilities(object):
         return addr - 0xffffff8000000000
 
     @classmethod
-    def files_descriptors_for_process(cls, config: interfaces.configuration.HierarchicalDict,
+    def files_descriptors_for_process(cls, 
                                       context: interfaces.context.ContextInterface,
+                                      symbol_table_name : str,
                                       task: interfaces.objects.ObjectInterface):
+
+        """Creates a generator for the file descriptors of a process
+
+        Args:
+            symbol_table_name: The name of the symbol table associated with the process
+            context:
+            task: The process structure to enumerate file descriptors from
+
+        Return:
+            A 3 element tuple is yielded for each file descriptor:
+            1) The file's object
+            2) The path referenced by the descriptor. 
+                The path is either empty, the full path of the file in the file system, or the formatted name for sockets, pipes, etc.
+            3) The file descriptor number
+        """
 
         try:
             num_fds = task.p_fd.fd_lastfile
@@ -234,7 +250,7 @@ class MacUtilities(object):
         if num_fds > 4096:
             num_fds = 1024
 
-        file_type = config["darwin"] + constants.BANG + 'fileproc'
+        file_type = symbol_table_name + constants.BANG + 'fileproc'
 
         try:
             table_addr = task.p_fd.fd_ofiles.dereference()
@@ -250,11 +266,11 @@ class MacUtilities(object):
                 except exceptions.InvalidAddressException:
                     continue
 
-                if ftype == 'DTYPE_VNODE':
+                if ftype == 'VNODE':
                     vnode = f.f_fglob.fg_data.dereference().cast("vnode")
                     path = vnode.full_path()
-                else:
-                    path = "<{}>".format(ftype.replace("DTYPE_", "").lower())
+                elif ftype:
+                    path = "<{}>".format(ftype.lower())
 
                 yield f, path, fd_num
 
