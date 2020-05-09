@@ -302,8 +302,8 @@ class DataLayerInterface(interfaces.configuration.ConfigurableInterface, metacla
                 result[1] = (last_start, self.maximum_address - last_start)
         return result
 
-    def _scan_iterator(self, scanner: 'ScannerInterface',
-                       sections: Iterable[Tuple[int, int]]) -> Iterable[IteratorValue]:
+    def _scan_iterator(self, scanner: 'ScannerInterface', sections: Iterable[Tuple[int,
+                                                                                   int]]) -> Iterable[IteratorValue]:
         """Iterator that indicates which blocks in the layer are to be read by
         for the scanning.
 
@@ -377,7 +377,9 @@ class TranslationLayerInterface(DataLayerInterface, metaclass = ABCMeta):
     """
 
     @abstractmethod
-    def mapping(self, offset: int, length: int,
+    def mapping(self,
+                offset: int,
+                length: int,
                 ignore_errors: bool = False) -> Iterable[Tuple[int, int, int, int, str]]:
         """Returns a sorted iterable of (offset, sublength, mapped_offset, mapped_length, layer)
         mappings.
@@ -396,11 +398,12 @@ class TranslationLayerInterface(DataLayerInterface, metaclass = ABCMeta):
         return []
 
     def _decode_data(self, data: bytes, mapped_offset: int, offset: int, output_length: int) -> bytes:
-        """Decodes any necessary data.
+        """Decodes any necessary data.  Note, additional data may need to be read from the lower layer, such as lookup
+        tables or similar.  The data provided to this layer is purely that data which encompasses the requested data
+        range.
 
         Args:
-            layer_name: The layer from which the data should be taken
-            value: The new value to encode
+            data: The bytes of data necessary for decoding
             mapped_offset: The offset in the underlying layer where the data would begin
             offset: The offset in the higher-layer where the data would begin
             output_length: The expected length of the returned data
@@ -409,11 +412,11 @@ class TranslationLayerInterface(DataLayerInterface, metaclass = ABCMeta):
              The data to be read from the underlying layer."""
         return data
 
-    def _encode_data(self, data: bytes, mapped_offset: int, offset: int, value: bytes) -> bytes:
+    def _encode_data(self, layer_name: str, mapped_offset: int, offset: int, value: bytes) -> bytes:
         """Encodes any necessary data.
 
         Args:
-            layer_name: The layer from which the data should be taken
+            layer_name: The layer to write data back to
             mapped_offset: The offset in the underlying layer where the data would begin
             offset: The offset in the higher-layer where the data would begin
             value: The new value to encode
@@ -466,7 +469,9 @@ class TranslationLayerInterface(DataLayerInterface, metaclass = ABCMeta):
 
             current_offset += len(new_data)
 
-    def _scan_iterator(self, scanner: 'ScannerInterface', sections: Iterable[Tuple[int, int]],
+    def _scan_iterator(self,
+                       scanner: 'ScannerInterface',
+                       sections: Iterable[Tuple[int, int]],
                        linear: bool = False) -> Iterable[IteratorValue]:
         """Iterator that indicates which blocks in the layer are to be read by
         for the scanning.

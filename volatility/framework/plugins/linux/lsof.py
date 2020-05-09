@@ -6,7 +6,7 @@ found in Linux's /proc file system."""
 import logging
 from typing import List
 
-from volatility.framework import renderers, interfaces
+from volatility.framework import renderers, interfaces, constants
 from volatility.framework.automagic import linux
 from volatility.framework.configuration import requirements
 from volatility.framework.interfaces import plugins
@@ -30,12 +30,18 @@ class Lsof(plugins.PluginInterface):
         ]
 
     def _generator(self, tasks):
+        symbol_table = None
         for task in tasks:
+            if symbol_table is None:
+                if constants.BANG not in task.vol.type_name:
+                    raise ValueError("Task is not part of a symbol table")
+                symbol_table = task.vol.type_name.split(constants.BANG)[0]
+
             name = utility.array_to_string(task.comm)
             pid = int(task.pid)
 
             for fd_num, _, full_path in linux.LinuxUtilities.files_descriptors_for_process(
-                    self.config, self.context, task):
+                    self.context, symbol_table, task):
                 yield (0, (pid, name, fd_num, full_path))
 
     def run(self):
