@@ -53,8 +53,22 @@ def hex_bytes_as_text(value: bytes) -> str:
     return output
 
 
-def optional(func):
+def multitypedata_as_text(value: format_hints.MultiTypeData) -> str:
+    """Renders the bytes as a string where possible, otherwise it displays hex data
 
+    This attempts to convert the string based on its encoding and if no data's been lost due to the split on the null character, then it displays it as is
+    """
+    if value.show_hex:
+        return hex_bytes_as_text(value)
+    string_representation = str(value, encoding = value.encoding, errors = 'replace')
+    if value.split_nulls and ((len(value) / 2 - 1) <= len(string_representation) <= (len(value) / 2)):
+        return "\n".join(string_representation.split("\x00"))
+    if len(string_representation) - 1 <= len(string_representation.split("\x00")[0]) <= len(string_representation):
+        return string_representation.split("\x00")[0]
+    return hex_bytes_as_text(value)
+
+
+def optional(func):
     @wraps(func)
     def wrapped(x: Any) -> str:
         if isinstance(x, interfaces.renderers.BaseAbsentValue):
@@ -68,12 +82,13 @@ def optional(func):
 
 
 def quoted_optional(func):
-
     @wraps(func)
     def wrapped(x: Any) -> str:
         result = optional(func)(x)
         if result == "-" or result == "N/A":
             return ""
+        if isinstance(x, format_hints.MultiTypeData) and x.converted_int:
+            return "{}".format(result)
         if isinstance(x, int) and not isinstance(x, (format_hints.Hex, format_hints.Bin)):
             return "{}".format(result)
         return "\"{}\"".format(result)
@@ -117,6 +132,7 @@ class QuickTextRenderer(CLIRenderer):
         format_hints.Bin: optional(lambda x: "0b{:b}".format(x)),
         format_hints.Hex: optional(lambda x: "0x{:x}".format(x)),
         format_hints.HexBytes: optional(hex_bytes_as_text),
+        format_hints.MultiTypeData: quoted_optional(multitypedata_as_text),
         interfaces.renderers.Disassembly: optional(display_disassembly),
         bytes: optional(lambda x: " ".join(["{0:2x}".format(b) for b in x])),
         datetime.datetime: optional(lambda x: x.strftime("%Y-%m-%d %H:%M:%S.%f %Z")),
@@ -172,6 +188,7 @@ class CSVRenderer(CLIRenderer):
         format_hints.Bin: quoted_optional(lambda x: "0b{:b}".format(x)),
         format_hints.Hex: quoted_optional(lambda x: "0x{:x}".format(x)),
         format_hints.HexBytes: quoted_optional(hex_bytes_as_text),
+        format_hints.MultiTypeData: quoted_optional(multitypedata_as_text),
         interfaces.renderers.Disassembly: quoted_optional(display_disassembly),
         bytes: quoted_optional(lambda x: " ".join(["{0:2x}".format(b) for b in x])),
         datetime.datetime: quoted_optional(lambda x: x.strftime("%Y-%m-%d %H:%M:%S.%f %Z")),
@@ -247,7 +264,7 @@ class PrettyTextRenderer(CLIRenderer):
         max_column_widths = dict([(column.name, len(column.name)) for column in grid.columns])
 
         def visitor(
-            node, accumulator: List[Tuple[int, Dict[interfaces.renderers.Column, bytes]]]
+                node, accumulator: List[Tuple[int, Dict[interfaces.renderers.Column, bytes]]]
         ) -> List[Tuple[int, Dict[interfaces.renderers.Column, bytes]]]:
             # Nodes always have a path value, giving them a path_depth of at least 1, we use max just in case
             max_column_widths[tree_indent_column] = max(max_column_widths.get(tree_indent_column, 0), node.path_depth)
@@ -269,7 +286,7 @@ class PrettyTextRenderer(CLIRenderer):
             grid.visit(node = None, function = visitor, initial_accumulator = final_output)
 
         # Always align the tree to the left
-        format_string_list = ["{0:<" + str(max_column_widths[tree_indent_column]) + "s}"]
+        format_string_list = ["{0:<" + str(max_column_widths.get(tree_indent_column, 0)) + "s}"]
         for column_index in range(len(grid.columns)):
             column = grid.columns[column_index]
             format_string_list.append("{" + str(column_index + 1) + ":" + display_alignment +
@@ -308,8 +325,8 @@ class JsonRenderer(CLIRenderer):
         final_output = ({}, [])
 
         def visitor(
-            node: Optional[interfaces.renderers.TreeNode],
-            accumulator: Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]],
+                node: Optional[interfaces.renderers.TreeNode],
+                accumulator: Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]
         ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
             # Nodes always have a path value, giving them a path_depth of at least 1, we use max just in case
             acc_map, final_tree = accumulator

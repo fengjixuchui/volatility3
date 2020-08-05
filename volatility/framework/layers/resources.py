@@ -37,6 +37,22 @@ vollog = logging.getLogger(__name__)
 #   fix this
 
 
+def cascadeCloseFile(new_fp, original_fp):
+    """Really horrible solution for ensuring files aren't left open
+
+    Args:
+        new_fp: The file pointer constructed based on the original file pointer
+        original_fp: The original file pointer that should be closed when the new file pointer is closed, but isn't
+    """
+
+    def close():
+        original_fp.close()
+        return new_fp.__class__.close(new_fp)
+
+    new_fp.close = close
+    return new_fp
+
+
 class ResourceAccessor(object):
     """Object for openning URLs as files (downloading locally first if
     necessary)"""
@@ -57,6 +73,12 @@ class ResourceAccessor(object):
             vollog.log(constants.LOGLEVEL_VVV,
                        "Available URL handlers: {}".format(", ".join([x.__name__ for x in self._handlers])))
             self.__class__.list_handlers = False
+
+    def uses_cache(self, url: str) -> bool:
+        """Determines whether a URLs contents should be cached"""
+        parsed_url = urllib.parse.urlparse(url)
+
+        return not parsed_url.scheme in ['file', 'jar']
 
     # Current urllib.request.urlopen returns Any, so we do the same
     def open(self, url: str, mode: str = "rb") -> Any:
@@ -87,16 +109,15 @@ class ResourceAccessor(object):
 
         with contextlib.closing(fp) as fp:
             # Cache the file locally
-            parsed_url = urllib.parse.urlparse(url)
 
-            if parsed_url.scheme == 'file':
+            if not self.uses_cache(url):
                 # ZipExtFiles (files in zips) cannot seek, so must be cached in order to use and/or decompress
                 curfile = urllib.request.urlopen(url, context = self._context)
             else:
                 # TODO: find a way to check if we already have this file (look at http headers?)
                 block_size = 1028 * 8
                 temp_filename = os.path.join(constants.CACHE_PATH,
-                                             "data_" + hashlib.sha512(bytes(url, 'latin-1')).hexdigest() + ".cache")
+                                             "data_" + hashlib.sha512(bytes(url, 'raw_unicode_escape')).hexdigest() + ".cache")
 
                 if not os.path.exists(temp_filename):
                     vollog.debug("Caching file at: {}".format(temp_filename))
@@ -140,12 +161,11 @@ class ResourceAccessor(object):
 
                 if detected:
                     if detected.mime_type == 'application/x-xz':
-                        curfile = lzma.LZMAFile(curfile, mode)
+                        curfile = cascadeCloseFile(lzma.LZMAFile(curfile, mode), curfile)
                     elif detected.mime_type == 'application/x-bzip2':
-                        curfile = bz2.BZ2File(curfile, mode)
+                        curfile = cascadeCloseFile(bz2.BZ2File(curfile, mode), curfile)
                     elif detected.mime_type == 'application/x-gzip':
-                        curfile = gzip.GzipFile(fileobj = curfile, mode = mode)
-
+                        curfile = cascadeCloseFile(gzip.GzipFile(fileobj = curfile, mode = mode), curfile)
                     if detected.mime_type in ['application/x-xz', 'application/x-bzip2', 'application/x-gzip']:
                         # Read and rewind to ensure we're inside any compressed file layers
                         curfile.read(1)
@@ -157,6 +177,7 @@ class ResourceAccessor(object):
 
         if not IMPORTED_MAGIC:
             # Somewhat of a hack, but prevents a hard dependency on the magic module
+            parsed_url = urllib.parse.urlparse(url)
             url_path = parsed_url.path
             stop = False
             while not stop:
@@ -164,11 +185,11 @@ class ResourceAccessor(object):
                 url_path, extension = url_path_split[:-1], url_path_split[-1]
                 url_path = ".".join(url_path)
                 if extension == "xz":
-                    curfile = lzma.LZMAFile(curfile, mode)
+                    curfile = cascadeCloseFile(lzma.LZMAFile(curfile, mode), curfile)
                 elif extension == "bz2":
-                    curfile = bz2.BZ2File(curfile, mode)
+                    curfile = cascadeCloseFile(bz2.BZ2File(curfile, mode), curfile)
                 elif extension == "gz":
-                    curfile = gzip.GzipFile(fileobj = curfile, mode = mode)
+                    curfile = cascadeCloseFile(gzip.GzipFile(fileobj = curfile, mode = mode), curfile)
                 else:
                     stop = True
 

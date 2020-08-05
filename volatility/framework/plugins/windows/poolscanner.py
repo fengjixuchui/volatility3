@@ -317,7 +317,8 @@ class PoolScanner(plugins.PluginInterface):
             PoolConstraint(b'CM10',
                            type_name = symbol_table + constants.BANG + "_CMHIVE",
                            size = (800, None),
-                           page_type = PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE),
+                           page_type = PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                           skip_type_test = True),
         ]
 
         if not tags_filter:
@@ -360,7 +361,12 @@ class PoolScanner(plugins.PluginInterface):
         if not is_windows_10:
             scan_layer = context.layers[scan_layer].config['memory_layer']
 
-        for constraint, header in cls.pool_scan(context, scan_layer, symbol_table, constraints, alignment = 8):
+        if symbols.symbol_table_is_64bit(context, symbol_table):
+            alignment = 0x10
+        else:
+            alignment = 8
+
+        for constraint, header in cls.pool_scan(context, scan_layer, symbol_table, constraints, alignment = alignment):
 
             mem_object = header.get_object(type_name = constraint.type_name,
                                            use_top_down = is_windows_8_or_later,

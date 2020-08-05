@@ -3,9 +3,9 @@
 #
 
 import logging
-from typing import Any, Iterable, List, Tuple, Type, Optional
+from typing import Any, Iterable, List, Tuple, Type, Optional, Callable
 
-from volatility.framework import interfaces, constants
+from volatility.framework import interfaces, constants, layers, exceptions
 from volatility.framework.automagic import symbol_cache
 from volatility.framework.configuration import requirements
 from volatility.framework.layers import scanners
@@ -20,6 +20,7 @@ class SymbolFinder(interfaces.automagic.AutomagicInterface):
     banner_config_key = "banner"  # type: str
     banner_cache = None  # type: Optional[Type[symbol_cache.SymbolBannerCache]]
     symbol_class = None  # type: Optional[str]
+    find_aslr = None  # type: Optional[Callable]
 
     def __init__(self, context: interfaces.context.ContextInterface, config_path: str) -> None:
         super().__init__(context, config_path)
@@ -88,7 +89,7 @@ class SymbolFinder(interfaces.automagic.AutomagicInterface):
 
         # Check if the Stacker has already found what we're looking for
         if layer.config.get(self.banner_config_key, None):
-            banner_list = [(0, bytes(layer.config[self.banner_config_key], 'latin-1'))]  # type: Iterable[Any]
+            banner_list = [(0, bytes(layer.config[self.banner_config_key], 'raw_unicode_escape'))]  # type: Iterable[Any]
         else:
             # Swap to the physical layer for scanning
             # TODO: Fix this so it works for layers other than just Intel
@@ -106,8 +107,29 @@ class SymbolFinder(interfaces.automagic.AutomagicInterface):
                 path_join = interfaces.configuration.path_join
                 context.config[path_join(config_path, requirement.name, "class")] = clazz
                 context.config[path_join(config_path, requirement.name, "isf_url")] = isf_path
+                context.config[path_join(config_path, requirement.name, "symbol_mask")] = layer.address_mask
+
+                # Set a default symbol_shift when attempt to determine it,
+                # so we can create the symbols which are used in finding the aslr_shift anyway
+                if not context.config.get(path_join(config_path, requirement.name, "symbol_shift"), None):
+                    # Don't overwrite it if it's already been set, it will be manually refound if not present
+                    prefound_kaslr_value = context.layers[layer_name].metadata.get('kaslr_value', 0)
+                    context.config[path_join(config_path, requirement.name, "symbol_shift")] = prefound_kaslr_value
                 # Construct the appropriate symbol table
                 requirement.construct(context, config_path)
+
+                # Apply the ASLR masking (only if we're not already shifted)
+                if self.find_aslr and not context.config.get(path_join(config_path, requirement.name, "symbol_shift"),
+                                                             None):
+                    unmasked_symbol_table_name = context.config.get(path_join(config_path, requirement.name), None)
+                    if not unmasked_symbol_table_name:
+                        raise exceptions.SymbolSpaceError("Symbol table could not be constructed")
+                    if not isinstance(layer, layers.intel.Intel):
+                        raise TypeError("Layer name {} is not an intel space")
+                    aslr_shift = self.find_aslr(context, unmasked_symbol_table_name, layer.config['memory_layer'])
+                    context.config[path_join(config_path, requirement.name, "symbol_shift")] = aslr_shift
+                    context.symbol_space.clear_symbol_cache(unmasked_symbol_table_name)
+
                 break
             else:
                 if symbol_files:

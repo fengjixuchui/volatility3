@@ -4,6 +4,7 @@
 """Volatility 3 framework."""
 # Check the python version to ensure it's suitable
 # We currently require 3.5.3 since 3.5.1 has no typing.Type and 3.5.2 is broken for ''/delayed encapsulated types
+import glob
 import sys
 
 required_python_version = (3, 5, 3)
@@ -102,18 +103,16 @@ def import_files(base_module, ignore_errors = False) -> List[str]:
                 if (f.endswith(".py") or f.endswith(".pyc") or f.endswith(".pyo")) and not f.startswith("__"):
                     modpath = os.path.join(root[len(path) + len(os.path.sep):], f[:f.rfind(".")])
                     module = modpath.replace(os.path.sep, ".")
-                    if module not in sys.modules:
+                    if base_module.__name__ + "." + module not in sys.modules:
                         try:
-                            vollog.debug("Importing module: {}.{}".format(base_module.__name__, module))
                             importlib.import_module(base_module.__name__ + "." + module)
                         except ImportError as e:
                             vollog.debug(str(e))
-                            vollog.debug("Failed to import module {} based on file: {}".format(module, modpath))
+                            vollog.debug("Failed to import module {} based on file: {}".format(
+                                base_module.__name__ + "." + module, modpath))
                             failures.append(base_module.__name__ + "." + module)
                             if not ignore_errors:
                                 raise
-                    else:
-                        vollog.info("Skipping existing module: {}".format(module))
     return failures
 
 
@@ -125,3 +124,11 @@ def list_plugins() -> Dict[str, Type[interfaces.plugins.PluginInterface]]:
             plugin_name = plugin_name[len("volatility.plugins."):]
         plugin_list[plugin_name] = plugin
     return plugin_list
+
+
+def clear_cache(complete = False):
+    glob_pattern = '*.cache'
+    if not complete:
+        glob_pattern = 'data_' + glob_pattern
+    for cache_filename in glob.glob(os.path.join(constants.CACHE_PATH, glob_pattern)):
+        os.unlink(cache_filename)

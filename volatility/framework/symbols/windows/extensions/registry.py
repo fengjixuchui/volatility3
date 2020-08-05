@@ -73,6 +73,13 @@ class HMAP_ENTRY(objects.StructType):
 
 class CMHIVE(objects.StructType):
 
+    def is_valid(self) -> bool:
+        """Determine if the object is valid."""
+        try:
+            return self.Hive.Signature == 0xbee0bee0
+        except exceptions.InvalidAddressException:
+            return False
+
     def get_name(self) -> Optional[interfaces.objects.ObjectInterface]:
         """Determine a name for the hive.
 
@@ -232,7 +239,7 @@ class CM_KEY_VALUE(objects.StructType):
         self.Name.count = namelength
         return self.Name.cast("string", max_length = namelength, encoding = "latin-1")
 
-    def decode_data(self) -> Union[str, bytes]:
+    def decode_data(self) -> Union[int, bytes]:
         """Properly decodes the data associated with the value node"""
         # Determine if the data is stored inline
         datalen = self.DataLength
@@ -280,22 +287,15 @@ class CM_KEY_VALUE(objects.StructType):
             if len(data) != struct.calcsize("<Q"):
                 raise ValueError("Size of data does not match the type of registry value {}".format(self.get_name()))
             return struct.unpack("<Q", data)[0]
-        if self_type in [RegValueTypes.REG_SZ, RegValueTypes.REG_EXPAND_SZ, RegValueTypes.REG_LINK]:
-            # truncate after \x00\x00 to ensure it can
-            output = str(data, encoding = "utf-16-le", errors = 'replace')
-            if output.find("\x00") > 0:
-                output = output[:output.find("\x00")]
-            return output
-        if self_type == RegValueTypes.REG_MULTI_SZ:
-            return str(data, encoding = "utf-16-le").split("\x00")[0]
         if self_type in [
+                RegValueTypes.REG_SZ, RegValueTypes.REG_EXPAND_SZ, RegValueTypes.REG_LINK, RegValueTypes.REG_MULTI_SZ,
                 RegValueTypes.REG_BINARY, RegValueTypes.REG_FULL_RESOURCE_DESCRIPTOR, RegValueTypes.REG_RESOURCE_LIST,
                 RegValueTypes.REG_RESOURCE_REQUIREMENTS_LIST
         ]:
             return data
         if self_type == RegValueTypes.REG_NONE:
-            return ''
+            return b''
 
         # Fall back if it's something weird
         vollog.debug("Unknown registry value type encountered: {}".format(self.Type))
-        return data.hex()
+        return data

@@ -11,7 +11,6 @@ User interfaces make use of the framework to:
  * display the results
 """
 import argparse
-import glob
 import inspect
 import json
 import logging
@@ -26,18 +25,17 @@ import volatility.symbols
 from volatility import framework
 from volatility.cli import text_renderer, volargparse
 from volatility.framework import automagic, constants, contexts, exceptions, interfaces, plugins, configuration
+from volatility.framework.automagic import stacker
 from volatility.framework.configuration import requirements
 
 # Make sure we log everything
 
 vollog = logging.getLogger()
-vollog.setLevel(1)
-# Trim the console down by default
 console = logging.StreamHandler()
 console.setLevel(logging.WARNING)
 formatter = logging.Formatter('%(levelname)-8s %(name)-12s: %(message)s')
+# Trim the console down by default
 console.setFormatter(formatter)
-vollog.addHandler(console)
 
 
 class PrintedProgress(object):
@@ -72,7 +70,14 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
     """Constructs a command-line interface object for users to run plugins."""
 
     def __init__(self):
+        self.setup_logging()
         self.output_dir = None
+
+    @classmethod
+    def setup_logging(cls):
+        # Delay the setting of vollog for those that want to import volatility.cli (issue #241)
+        vollog.setLevel(1)
+        vollog.addHandler(console)
 
     def run(self):
         """Executes the command line module, taking the system arguments,
@@ -82,8 +87,16 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
 
         renderers = dict([(x.name.lower(), x) for x in framework.class_subclasses(text_renderer.CLIRenderer)])
 
-        parser = volargparse.HelpfulArgParser(prog = 'volatility',
+        parser = volargparse.HelpfulArgParser(add_help = False,
+                                              prog = 'volatility',
                                               description = "An open-source memory forensics framework")
+        parser.add_argument(
+            "-h",
+            "--help",
+            action = "help",
+            default = argparse.SUPPRESS,
+            help = "Show this help message and exit, for specific plugin options use '{} <pluginname> --help'".format(
+                parser.prog))
         parser.add_argument("-c",
                             "--config",
                             help = "Load the configuration from a json file",
@@ -120,7 +133,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
         parser.add_argument("-o",
                             "--output-dir",
                             help = "Directory in which to output any generated files",
-                            default = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')),
+                            default = os.getcwd(),
                             type = str)
         parser.add_argument("-q", "--quiet", help = "Remove progress feedback", default = False, action = 'store_true')
         parser.add_argument("-r",
@@ -187,8 +200,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
             constants.PARALLELISM = constants.Parallelism.Off
 
         if partial_args.clear_cache:
-            for cache_filename in glob.glob(os.path.join(constants.CACHE_PATH, '*.cache')):
-                os.unlink(cache_filename)
+            framework.clear_cache()
 
         # Do the initialization
         ctx = contexts.Context()  # Construct a blank context
@@ -265,6 +277,8 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
 
         # It should be up to the UI to determine which automagics to run, so this is before BACK TO THE FRAMEWORK
         automagics = automagic.choose_automagic(automagics, plugin)
+        if ctx.config.get('automagic.LayerStacker.stackers', None) is None:
+            ctx.config['automagic.LayerStacker.stackers'] = stacker.choose_os_stackers(plugin)
         self.output_dir = args.output_dir
 
         ###
@@ -472,8 +486,9 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
                     if "type" in additional:
                         del additional["type"]
             elif isinstance(requirement, volatility.framework.configuration.requirements.ListRequirement):
-                # This is a trick to generate a list of values
-                additional["type"] = lambda x: x.split(',')
+                additional["type"] = requirement.element_type
+                nargs = '*' if requirement.optional else '+'
+                additional["nargs"] = nargs
             elif isinstance(requirement, volatility.framework.configuration.requirements.ChoiceRequirement):
                 additional["type"] = str
                 additional["choices"] = requirement.choices

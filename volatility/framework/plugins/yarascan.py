@@ -3,7 +3,7 @@
 #
 
 import logging
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Dict, Any
 
 from volatility.framework import interfaces, renderers
 from volatility.framework.configuration import requirements
@@ -21,6 +21,7 @@ except ImportError:
 
 
 class YaraScanner(interfaces.layers.ScannerInterface):
+    _version = (2, 0, 0)
 
     # yara.Rules isn't exposed, so we can't type this properly
     def __init__(self, rules) -> None:
@@ -30,11 +31,13 @@ class YaraScanner(interfaces.layers.ScannerInterface):
     def __call__(self, data: bytes, data_offset: int) -> Iterable[Tuple[int, str, bytes]]:
         for match in self._rules.match(data = data):
             for offset, name, value in match.strings:
-                yield (offset + data_offset, name, value)
+                yield (offset + data_offset, match.rule, name, value)
 
 
 class YaraScan(plugins.PluginInterface):
     """Scans kernel memory using yara rules (string or file)."""
+
+    _version = (1, 0, 0)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -60,26 +63,31 @@ class YaraScan(plugins.PluginInterface):
                                         optional = True)
         ]
 
-    def _generator(self):
-
-        layer = self.context.layers[self.config['primary']]
+    @classmethod
+    def process_yara_options(cls, config: Dict[str, Any]):
         rules = None
-        if self.config.get('yara_rules', None) is not None:
-            rule = self.config['yara_rules']
+        if config.get('yara_rules', None) is not None:
+            rule = config['yara_rules']
             if rule[0] not in ["{", "/"]:
                 rule = '"{}"'.format(rule)
-            if self.config.get('case', False):
+            if config.get('case', False):
                 rule += " nocase"
-            if self.config.get('wide', False):
+            if config.get('wide', False):
                 rule += " wide ascii"
             rules = yara.compile(sources = {'n': 'rule r1 {{strings: $a = {} condition: $a}}'.format(rule)})
-        elif self.config.get('yara_file', None) is not None:
-            rules = yara.compile(file = resources.ResourceAccessor().open(self.config['yara_file'], "rb"))
+        elif config.get('yara_file', None) is not None:
+            rules = yara.compile(file = resources.ResourceAccessor().open(config['yara_file'], "rb"))
         else:
             vollog.error("No yara rules, nor yara rules file were specified")
+        return rules
 
-        for offset, name, value in layer.scan(context = self.context, scanner = YaraScanner(rules = rules)):
-            yield (0, (format_hints.Hex(offset), name, value))
+    def _generator(self):
+        rules = self.process_yara_options(dict(self.config))
+
+        layer = self.context.layers[self.config['primary']]
+        for offset, rule_name, name, value in layer.scan(context = self.context, scanner = YaraScanner(rules = rules)):
+            yield 0, (format_hints.Hex(offset), rule_name, name, value)
 
     def run(self):
-        return renderers.TreeGrid([('Offset', format_hints.Hex), ('Rule', str), ('Value', bytes)], self._generator())
+        return renderers.TreeGrid([('Offset', format_hints.Hex), ('Rule', str), ('Component', str), ('Value', bytes)],
+                                  self._generator())

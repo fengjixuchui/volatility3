@@ -6,12 +6,12 @@ import logging
 from typing import Iterable, Callable
 
 from volatility.framework import exceptions, renderers, interfaces
-from volatility.framework.automagic import mac
 from volatility.framework.configuration import requirements
 from volatility.framework.interfaces import plugins
 from volatility.framework.objects import utility
 from volatility.framework.renderers import format_hints
-from volatility.plugins.mac import tasks
+from volatility.framework.symbols import mac
+from volatility.plugins.mac import pslist
 
 vollog = logging.getLogger(__name__)
 
@@ -26,7 +26,11 @@ class Netstat(plugins.PluginInterface):
                                                      description = 'Kernel Address Space',
                                                      architectures = ["Intel32", "Intel64"]),
             requirements.SymbolTableRequirement(name = "darwin", description = "Mac Kernel"),
-            requirements.PluginRequirement(name = 'tasks', plugin = tasks.Tasks, version = (1, 0, 0))
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
+            requirements.ListRequirement(name = 'pid',
+                                         description = 'Filter on specific process IDs',
+                                         element_type = int,
+                                         optional = True)
         ]
 
     @classmethod
@@ -35,7 +39,7 @@ class Netstat(plugins.PluginInterface):
                      layer_name: str,
                      darwin_symbols: str,
                      filter_func: Callable[[int], bool] = lambda _: False) -> \
-                Iterable[interfaces.objects.ObjectInterface]:
+            Iterable[interfaces.objects.ObjectInterface]:
         """
         Returns the open socket descriptors of a process
 
@@ -45,7 +49,9 @@ class Netstat(plugins.PluginInterface):
                 2) The process ID of the processed that opened the socket
                 3) The address of the associated socket structure
         """
-        for task in tasks.Tasks.list_tasks(context, layer_name, darwin_symbols, filter_func):
+        # This is hardcoded, since a change in the default method would change the expected results
+        list_tasks = pslist.PsList.get_list_tasks(pslist.PsList.pslist_methods[0])
+        for task in list_tasks(context, layer_name, darwin_symbols, filter_func):
 
             task_name = utility.array_to_string(task.p_comm)
             pid = task.p_pid
@@ -67,7 +73,7 @@ class Netstat(plugins.PluginInterface):
                 yield task_name, pid, socket
 
     def _generator(self):
-        filter_func = tasks.Tasks.create_pid_filter([self.config.get('pid', None)])
+        filter_func = pslist.PsList.create_pid_filter(self.config.get('pid', None))
 
         for task_name, pid, socket in self.list_sockets(self.context,
                                                         self.config['primary'],
@@ -99,8 +105,6 @@ class Netstat(plugins.PluginInterface):
                                "{}/{:d}".format(task_name, pid)))
 
     def run(self):
-        # mac.MacUtilities.aslr_mask_symbol_table(self.config, self.context)
-
         return renderers.TreeGrid([("Offset", format_hints.Hex), ("Proto", str), ("Local IP", str), ("Local Port", int),
                                    ("Remote IP", str), ("Remote Port", int), ("State", str), ("Process", str)],
                                   self._generator())

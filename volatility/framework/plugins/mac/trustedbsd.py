@@ -7,17 +7,17 @@ from typing import List, Iterator, Any
 
 from volatility.framework import exceptions, interfaces
 from volatility.framework import renderers, contexts
-from volatility.framework.automagic import mac
 from volatility.framework.configuration import requirements
 from volatility.framework.interfaces import plugins
 from volatility.framework.objects import utility
 from volatility.framework.renderers import format_hints
+from volatility.framework.symbols import mac
 from volatility.plugins.mac import lsmod
 
 vollog = logging.getLogger(__name__)
 
 
-class trustedbsd(plugins.PluginInterface):
+class Trustedbsd(plugins.PluginInterface):
     """Checks for malicious trustedbsd modules"""
 
     @classmethod
@@ -31,8 +31,6 @@ class trustedbsd(plugins.PluginInterface):
         ]
 
     def _generator(self, mods: Iterator[Any]):
-        mac.MacUtilities.aslr_mask_symbol_table(self.context, self.config['darwin'], self.config['primary'])
-
         kernel = contexts.Module(self._context, self.config['darwin'], self.config['primary'], 0)
 
         handlers = mac.MacUtilities.generate_kernel_handler_info(self.context, self.config['primary'], kernel, mods)

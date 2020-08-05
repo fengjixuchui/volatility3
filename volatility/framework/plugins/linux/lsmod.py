@@ -5,8 +5,7 @@
 found in Linux's /proc file system."""
 
 import logging
-
-from typing import List, Generator, Iterable
+from typing import List, Iterable
 
 from volatility.framework import contexts
 from volatility.framework import exceptions, renderers, constants, interfaces
@@ -21,6 +20,8 @@ vollog = logging.getLogger(__name__)
 
 class Lsmod(plugins.PluginInterface):
     """Lists loaded kernel modules."""
+
+    _version = (1, 0, 0)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -46,8 +47,6 @@ class Lsmod(plugins.PluginInterface):
 
         This function will throw a SymbolError exception if kernel module support is not enabled.
         """
-        linux.LinuxUtilities.aslr_mask_symbol_table(context, vmlinux_symbols, layer_name)
-
         vmlinux = contexts.Module(context, vmlinux_symbols, layer_name, 0)
 
         modules = vmlinux.object_from_symbol(symbol_name = "modules").cast("list_head")

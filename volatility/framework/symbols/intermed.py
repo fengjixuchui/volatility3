@@ -83,7 +83,9 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
                  native_types: interfaces.symbols.NativeTableInterface = None,
                  table_mapping: Optional[Dict[str, str]] = None,
                  validate: bool = True,
-                 class_types: Optional[Mapping[str, Type[interfaces.objects.ObjectInterface]]] = None) -> None:
+                 class_types: Optional[Mapping[str, Type[interfaces.objects.ObjectInterface]]] = None,
+                 symbol_shift: int = 0,
+                 symbol_mask: int = 0) -> None:
         """Instantiates a SymbolTable based on an IntermediateSymbolFormat JSON file.  This is validated against the
         appropriate schema.  The validation can be disabled by passing validate = False, but this should almost never be
         done.
@@ -97,6 +99,8 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
             table_mapping: A dictionary linking names referenced in the file with symbol tables in the context
             validate: Determines whether the ISF file will be validated against the appropriate schema
             class_types: A dictionary of type names and classes that override StructType when they are instantiated
+            symbol_shift: An offset by which to alter all returned symbols for this table
+            symbol_mask: An address mask used for all returned symbol offsets from this table (a mask of 0 disables masking)
         """
         # Check there are no obvious errors
         # Open the file and test the version
@@ -116,6 +120,11 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
         self._delegate = self._closest_version(metadata.get('format', "0.0.0"),
                                                self._versions)(context, config_path, name, json_object, native_types,
                                                                table_mapping)
+        if self._delegate.version < constants.ISF_MINIMUM_SUPPORTED:
+            raise RuntimeError("ISF version {} is no longer supported: {}".format(metadata.get('format', "0.0.0"),
+                                                                                  isf_url))
+        elif self._delegate.version < constants.ISF_MINIMUM_DEPRECATED:
+            vollog.warning("ISF version {} has been deprecated: {}".format(metadata.get('format', "0.0.0"), isf_url))
 
         # Inherit
         super().__init__(context,
@@ -124,6 +133,11 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
                          native_types or self._delegate.natives,
                          table_mapping = table_mapping,
                          class_types = class_types)
+
+        # Since we've been created with parameters, ensure our config is populated likewise
+        self.config['isf_url'] = isf_url
+        self.config['symbol_shift'] = symbol_shift
+        self.config['symbol_mask'] = symbol_mask
 
     @staticmethod
     def _closest_version(version: str, versions: Dict[Tuple[int, int, int], Type['ISFormatTable']]) \
@@ -148,6 +162,7 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
     types = _construct_delegate_function('types', True)
     enumerations = _construct_delegate_function('enumerations', True)
     metadata = _construct_delegate_function('metadata', True)
+    clear_symbol_cache = _construct_delegate_function('clear_symbol_cache')
     get_type = _construct_delegate_function('get_type')
     get_symbol = _construct_delegate_function('get_symbol')
     get_enumeration = _construct_delegate_function('get_enumeration')
@@ -207,7 +222,9 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
                filename: str,
                native_types: Optional[interfaces.symbols.NativeTableInterface] = None,
                table_mapping: Optional[Dict[str, str]] = None,
-               class_types: Optional[Mapping[str, Type[interfaces.objects.ObjectInterface]]] = None) -> str:
+               class_types: Optional[Mapping[str, Type[interfaces.objects.ObjectInterface]]] = None,
+               symbol_shift: int = 0,
+               symbol_mask: int = 0) -> str:
         """Takes a context and loads an intermediate symbol table based on a
         filename.
 
@@ -218,6 +235,8 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
             filename: Basename of the file to find under the sub_path
             native_types: Set of native types, defaults to native types read from the intermediate symbol format file
             table_mapping: a dictionary of table names mentioned within the ISF file, and the tables within the context which they map to
+            symbol_shift: An offset by which to alter all returned symbols for this table
+            symbol_mask: An address mask used for all returned symbol offsets from this table (a mask of 0 disables masking)
 
         Returns:
              the name of the added symbol table
@@ -232,15 +251,17 @@ class IntermediateSymbolTable(interfaces.symbols.SymbolTableInterface):
                     isf_url = urls[0],
                     native_types = native_types,
                     table_mapping = table_mapping,
-                    class_types = class_types)
+                    class_types = class_types,
+                    symbol_shift = symbol_shift,
+                    symbol_mask = symbol_mask)
         context.symbol_space.append(table)
         return table_name
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
-        return [
+        return super().get_requirements() + [
             requirements.StringRequirement(
-                "isf_url", description = "JSON file containing the symbols encoded in the Intermediate Symbol Format")
+                "isf_url", description = "JSON file containing the symbols encoded in the Intermediate Symbol Format"),
         ]
 
 
@@ -299,6 +320,10 @@ class ISFormatTable(interfaces.symbols.SymbolTableInterface, metaclass = ABCMeta
         table."""
         return None
 
+    def clear_symbol_cache(self) -> None:
+        """Clears the symbol cache of the symbol table."""
+        self._symbol_cache.clear()
+
 
 class Version1Format(ISFormatTable):
     """Class for storing intermediate debugging data as objects and classes."""
@@ -313,7 +338,10 @@ class Version1Format(ISFormatTable):
         symbol = self._json_object['symbols'].get(name, None)
         if not symbol:
             raise exceptions.SymbolError(name, self.name, "Unknown symbol: {}".format(name))
-        self._symbol_cache[name] = interfaces.symbols.SymbolInterface(name = name, address = symbol['address'])
+        address = symbol['address'] + self.config.get('symbol_shift', 0)
+        if self.config.get('symbol_mask', 0):
+            address = address & self.config['symbol_mask']
+        self._symbol_cache[name] = interfaces.symbols.SymbolInterface(name = name, address = address)
         return self._symbol_cache[name]
 
     @property
@@ -514,8 +542,13 @@ class Version3Format(Version2Format):
         symbol_type = None
         if 'type' in symbol:
             symbol_type = self._interdict_to_template(symbol['type'])
+
+        # Mask the addresses if necessary
+        address = symbol['address'] + self.config.get('symbol_shift', 0)
+        if self.config.get('symbol_mask', 0):
+            address = address & self.config['symbol_mask']
         self._symbol_cache[name] = interfaces.symbols.SymbolInterface(name = name,
-                                                                      address = symbol['address'],
+                                                                      address = address,
                                                                       type = symbol_type)
         return self._symbol_cache[name]
 
@@ -569,8 +602,13 @@ class Version5Format(Version4Format):
         symbol_constant_data = None
         if 'constant_data' in symbol:
             symbol_constant_data = base64.b64decode(symbol.get('constant_data'))
+
+        # Mask the addresses if necessary
+        address = symbol['address'] + self.config.get('symbol_shift', 0)
+        if self.config.get('symbol_mask', 0):
+            address = address & self.config['symbol_mask']
         self._symbol_cache[name] = interfaces.symbols.SymbolInterface(name = name,
-                                                                      address = symbol['address'],
+                                                                      address = address,
                                                                       type = symbol_type,
                                                                       constant_data = symbol_constant_data)
         return self._symbol_cache[name]

@@ -1,17 +1,15 @@
-# This file is Copyright 2019 Volatility Foundation and licensed under the Volatility Software License 1.0
+# This file is Copyright 2020 Volatility Foundation and licensed under the Volatility Software License 1.0
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 import logging
-from typing import List, Iterator, Any
+from typing import List
 
-import volatility
 from volatility.framework import exceptions, interfaces
-from volatility.framework import renderers, constants, contexts
-from volatility.framework.automagic import mac
+from volatility.framework import renderers, contexts
 from volatility.framework.configuration import requirements
 from volatility.framework.interfaces import plugins
 from volatility.framework.renderers import format_hints
-from volatility.framework.objects import utility
+from volatility.framework.symbols import mac
 from volatility.plugins.mac import lsmod
 
 vollog = logging.getLogger(__name__)
@@ -31,8 +29,6 @@ class Timers(plugins.PluginInterface):
         ]
 
     def _generator(self):
-        mac.MacUtilities.aslr_mask_symbol_table(self.context, self.config['darwin'], self.config['primary'])
-
         kernel = contexts.Module(self.context, self.config['darwin'], self.config['primary'], 0)
 
         mods = lsmod.Lsmod.list_modules(self.context, self.config['primary'], self.config['darwin'])
@@ -72,7 +68,7 @@ class Timers(plugins.PluginInterface):
                 module_name, symbol_name = mac.MacUtilities.lookup_module_address(self.context, handlers, handler)
 
                 yield (0, (format_hints.Hex(handler), format_hints.Hex(timer.param0), format_hints.Hex(timer.param1), \
-                            timer.deadline, entry_time, module_name, symbol_name))
+                           timer.deadline, entry_time, module_name, symbol_name))
 
     def run(self):
         return renderers.TreeGrid([("Function", format_hints.Hex), ("Param 0", format_hints.Hex),

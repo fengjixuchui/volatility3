@@ -156,9 +156,12 @@ class PrimitiveObject(interfaces.objects.ObjectInterface):
         return self._context.layers.write(self.vol.layer_name, self.vol.offset, data)
 
 
+# This must be int (and the _struct_type must be int) because bool cannot be inherited from:
+# https://mail.python.org/pipermail/python-dev/2002-March/020822.html
+# https://mail.python.org/pipermail/python-dev/2004-February/042537.html
 class Boolean(PrimitiveObject, int):
     """Primitive Object that handles boolean types."""
-    _struct_type = bool  # type: ClassVar[Type]
+    _struct_type = int  # type: ClassVar[Type]
 
 
 class Integer(PrimitiveObject, int):
@@ -326,7 +329,7 @@ class Pointer(Integer):
         """Determines whether the address of this pointer can be read from
         memory."""
         layer_name = layer_name or self.vol.layer_name
-        return self._context.layers[layer_name].is_valid(self, self.vol.size)
+        return self._context.layers[layer_name].is_valid(self, self.vol.subtype.size)
 
     def __getattr__(self, attr: str) -> Any:
         """Convenience function to access unknown attributes by getting them
@@ -462,6 +465,11 @@ class Enumeration(interfaces.objects.ObjectInterface, int):
     @property
     def choices(self) -> Dict[str, int]:
         return self._vol['choices']
+
+    @property
+    def is_valid_choice(self) -> bool:
+        """Returns whether the value for the object is a valid choice"""
+        return self in self.choices.values()
 
     def __getattr__(self, attr: str) -> str:
         """Returns the value for a specific name."""

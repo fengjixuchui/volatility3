@@ -176,6 +176,29 @@ class ObjectInterface(metaclass = ABCMeta):
         """
         return False
 
+    def has_valid_member(self, member_name: str) -> bool:
+        """Returns whether the dereferenced type has a valid member.
+
+        Args:
+            member_name: Name of the member to test access to determine if the member is valid or not
+        """
+        if self.has_member(member_name):
+            # noinspection PyBroadException
+            try:
+                _ = getattr(self, member_name)
+                return True
+            except Exception:
+                pass
+        return False
+
+    def has_valid_members(self, member_names: List[str]) -> bool:
+        """Returns whether the object has all of the members listed in member_names
+
+        Args:
+            member_names: List of names to test as to members with those names validity
+        """
+        return all([self.has_valid_member(member_name) for member_name in member_names])
+
     class VolTemplateProxy(metaclass = abc.ABCMeta):
         """A container for proxied methods that the ObjectTemplate of this
         object will call.  This is primarily to keep methods together for easy

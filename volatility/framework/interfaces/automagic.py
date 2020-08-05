@@ -7,11 +7,14 @@ runs.
 Automagic objects attempt to automatically fill configuration values
 that a user has not filled.
 """
+import logging
 from abc import ABCMeta
 from typing import Any, List, Optional, Tuple, Union, Type
 
 from volatility.framework import interfaces, constants
 from volatility.framework.configuration import requirements
+
+vollog = logging.getLogger(__name__)
 
 
 class AutomagicInterface(interfaces.configuration.ConfigurableInterface, metaclass = ABCMeta):
@@ -101,6 +104,9 @@ class StackerLayerInterface(metaclass = ABCMeta):
     """
 
     stack_order = 0
+    """The order in which to attempt stacking, the lower the earlier"""
+    exclusion_list = []
+    """The list operating systems/first-level plugin hierarchy that should exclude this stacker"""
 
     @classmethod
     def stack(self,
@@ -121,3 +127,8 @@ class StackerLayerInterface(metaclass = ABCMeta):
            layer_name: Name of the layer to stack on top of
            progress_callback: A callback function to indicate progress through a scan (if one is necessary)
         """
+
+    @classmethod
+    def stacker_slow_warning(cls):
+        vollog.warning(
+            "Reads to this layer are slow, it's recommended to use the layerwriter plugin once to produce a raw file")

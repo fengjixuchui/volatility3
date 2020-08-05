@@ -1,8 +1,8 @@
 import functools
 import struct
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Union
 
-from volatility.framework import objects, interfaces, constants, symbols, exceptions
+from volatility.framework import objects, interfaces, constants, symbols, exceptions, renderers
 from volatility.framework.renderers import conversion
 
 
@@ -166,6 +166,48 @@ class POOL_HEADER(objects.StructType):
         return headers, sizes
 
 
+class POOL_TRACKER_BIG_PAGES(objects.StructType):
+    """A kernel big page pool tracker."""
+
+    pool_type_lookup = {}
+
+    def _generate_pool_type_lookup(self):
+        # Enumeration._generate_inverse_choices() raises ValueError because multiple enum names map to the same
+        # value in the kernel _POOL_TYPE so create a custom mapping here and take the first match
+        symbol_table_name = self.vol.type_name.split(constants.BANG)[0]
+        pool_type_enum = self._context.symbol_space.get_enumeration(symbol_table_name + constants.BANG + "_POOL_TYPE")
+        for k, v in pool_type_enum.choices.items():
+            if v not in self.pool_type_lookup:
+                self.pool_type_lookup[v] = k
+
+    def is_valid(self) -> bool:
+        return self.Key > 0
+        # return self.Va > 0x1
+
+    def get_key(self) -> str:
+        """Returns the Key value as a 4 character string"""
+        tag_bytes = objects.convert_value_to_data(self.Key, int, objects.DataFormatInfo(4, "little", False))
+        return "".join([chr(x) if 32 < x < 127 else '' for x in tag_bytes])
+
+    def get_pool_type(self) -> Union[str, interfaces.renderers.BaseAbsentValue]:
+        """Returns the enum name for the PoolType value on applicable systems"""
+        # Not applicable until Vista
+        if hasattr(self, 'PoolType'):
+            if not self.pool_type_lookup:
+                self._generate_pool_type_lookup()
+            return self.pool_type_lookup.get(self.PoolType, "Unknown choice {}".format(self.PoolType))
+        else:
+            return renderers.NotApplicableValue()
+
+    def get_number_of_bytes(self) -> Union[int, interfaces.renderers.BaseAbsentValue]:
+        """Returns the NumberOfBytes value on applicable systems"""
+        # Not applicable until Vista
+        try:
+            return self.NumberOfBytes
+        except AttributeError:
+            return renderers.NotApplicableValue()
+
+
 class ExecutiveObject(interfaces.objects.ObjectInterface):
     """This is used as a "mixin" that provides all kernel executive objects
     with a means of finding their own object header."""
@@ -251,6 +293,10 @@ class OBJECT_HEADER(objects.StructType):
             header_offset = self._context.object(symbol_table_name + constants.BANG + "unsigned char",
                                                  layer_name = self.vol.native_layer_name,
                                                  offset = kvo + address + calculated_index)
+
+        if header_offset == 0:
+            raise ValueError("Could not find _OBJECT_HEADER_NAME_INFO for object at {} of layer {}".format(
+                self.vol.offset, self.vol.layer_name))
 
         header = self._context.object(symbol_table_name + constants.BANG + "_OBJECT_HEADER_NAME_INFO",
                                       layer_name = self.vol.layer_name,

@@ -2,16 +2,16 @@
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 import logging
-from typing import List, Iterator, Any
+from typing import List
 
 import volatility
 from volatility.framework import exceptions, interfaces
-from volatility.framework import renderers, constants, contexts
-from volatility.framework.automagic import mac
+from volatility.framework import renderers, contexts
 from volatility.framework.configuration import requirements
 from volatility.framework.interfaces import plugins
-from volatility.framework.renderers import format_hints
 from volatility.framework.objects import utility
+from volatility.framework.renderers import format_hints
+from volatility.framework.symbols import mac
 from volatility.plugins.mac import lsmod
 
 vollog = logging.getLogger(__name__)
@@ -112,8 +112,6 @@ class Check_sysctl(plugins.PluginInterface):
                 break
 
     def _generator(self):
-        mac.MacUtilities.aslr_mask_symbol_table(self.context, self.config['darwin'], self.config['primary'])
-
         kernel = contexts.Module(self._context, self.config['darwin'], self.config['primary'], 0)
 
         mods = lsmod.Lsmod.list_modules(self.context, self.config['primary'], self.config['darwin'])
