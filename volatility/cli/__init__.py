@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 import traceback
-from typing import Dict, Type, Union
+from typing import Dict, Type, Union, Any
 from urllib import parse, request
 
 import volatility.plugins
@@ -69,6 +69,8 @@ class MuteProgress(PrintedProgress):
 class CommandLine(interfaces.plugins.FileConsumerInterface):
     """Constructs a command-line interface object for users to run plugins."""
 
+    CLI_NAME = 'volatility'
+
     def __init__(self):
         self.setup_logging()
         self.output_dir = None
@@ -88,7 +90,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
         renderers = dict([(x.name.lower(), x) for x in framework.class_subclasses(text_renderer.CLIRenderer)])
 
         parser = volargparse.HelpfulArgParser(add_help = False,
-                                              prog = 'volatility',
+                                              prog = self.CLI_NAME,
                                               description = "An open-source memory forensics framework")
         parser.add_argument(
             "-h",
@@ -226,6 +228,8 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
 
         subparser = parser.add_subparsers(title = "Plugins",
                                           dest = "plugin",
+                                          description = "For plugin specific options, run '{} <plugin> --help'".format(
+                                              self.CLI_NAME),
                                           action = volargparse.HelpfulSubparserAction)
         for plugin in sorted(plugin_list):
             plugin_parser = subparser.add_parser(plugin, help = plugin_list[plugin].__doc__)
@@ -354,7 +358,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
             detail = "{}".format(excp)
             caused_by = [
                 "An invalid symbol table", "A plugin requesting a bad symbol"
-                "A plugin requesting a symbol from the wrong table"
+                                           "A plugin requesting a symbol from the wrong table"
             ]
         elif isinstance(excp, exceptions.LayerException):
             general = "Volatility experienced a layer-related issue: {}".format(excp.layer_name)

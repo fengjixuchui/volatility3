@@ -5,9 +5,8 @@
 import collections
 import collections.abc
 import enum
-import functools
 import logging
-from typing import Any, Dict, Iterable, Iterator, TypeVar
+from typing import Any, Dict, Iterable, Iterator, TypeVar, List
 
 from volatility.framework import constants, exceptions, interfaces, objects
 
@@ -40,9 +39,9 @@ class SymbolSpace(interfaces.symbols.SymbolSpaceInterface):
     def clear_symbol_cache(self, table_name: str = None) -> None:
         """Clears the symbol cache for the specified table name. If no table
         name is specified, the caches of all symbol tables are cleared."""
-        table_list = list()
+        table_list = list()  # type: List[interfaces.symbols.BaseSymbolTableInterface]
         if table_name is None:
-            table_list = self._dict.values()
+            table_list = list(self._dict.values())
         else:
             table_list.append(self._dict[table_name])
         for table in table_list:
@@ -193,18 +192,7 @@ class SymbolSpace(interfaces.symbols.SymbolSpaceInterface):
         """Look-up a symbol name across all the contained symbol spaces."""
         retval = self._weak_resolve(SymbolType.SYMBOL, symbol_name)
         if symbol_name not in self._resolved_symbols and retval.type is not None:
-            # Stash the old resolved type if it exists
-            old_resolved = self._resolved_symbols.get(symbol_name, None)
-            try:
-                self._resolved_symbols[symbol_name] = retval.type
-                for child in retval.type.children:
-                    if isinstance(child, objects.templates.ReferenceTemplate):
-                        # Resolve the child, then replace it
-                        child_resolved = self.get_type(child.vol.type_name)
-                        retval.type.replace_child(child, child_resolved)
-            finally:
-                if old_resolved is not None:
-                    self._resolved_symbols[symbol_name] = old_resolved
+            self._resolved_symbols[symbol_name] = self._subresolve(retval.type)
         if not isinstance(retval, interfaces.symbols.SymbolInterface):
             table_name = None
             index = symbol_name.find(constants.BANG)
@@ -212,6 +200,16 @@ class SymbolSpace(interfaces.symbols.SymbolSpaceInterface):
                 table_name, symbol_name = symbol_name[:index], symbol_name[index + 1:]
             raise exceptions.SymbolError(symbol_name, table_name, "Unresolvable Symbol: {}".format(symbol_name))
         return retval
+
+    def _subresolve(self, object_template: interfaces.objects.Template) -> interfaces.objects.Template:
+        """Ensure an ObjectTemplate doesn't contain any ReferenceTemplates"""
+        for child in object_template.children:
+            if isinstance(child, objects.templates.ReferenceTemplate):
+                new_child = self.get_type(child.vol.type_name)
+            else:
+                new_child = self._subresolve(child)
+            object_template.replace_child(old_child = child, new_child = new_child)
+        return object_template
 
     def get_enumeration(self, enum_name: str) -> interfaces.objects.Template:
         """Look-up a set of enumeration choices from a specific symbol
