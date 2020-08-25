@@ -6,7 +6,6 @@ import logging
 from typing import Callable, Iterable, List, Dict
 
 from volatility.framework import renderers, interfaces, contexts, exceptions
-from volatility.framework.automagic import mac
 from volatility.framework.configuration import requirements
 from volatility.framework.objects import utility
 

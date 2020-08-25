@@ -3,10 +3,8 @@
 #
 
 from typing import Dict, Tuple
-
 from volatility.framework import constants
 from volatility.framework import objects, interfaces
-
 
 class elf(objects.StructType):
     '''

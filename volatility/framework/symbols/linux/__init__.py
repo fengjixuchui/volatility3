@@ -7,6 +7,7 @@ from volatility.framework import exceptions, constants, interfaces, objects, con
 from volatility.framework.objects import utility
 from volatility.framework.symbols import intermed
 from volatility.framework.symbols.linux import extensions
+from volatility.framework.objects import utility
 
 
 class LinuxKernelIntermedSymbols(intermed.IntermediateSymbolTable):
@@ -36,8 +37,10 @@ class LinuxKernelIntermedSymbols(intermed.IntermediateSymbolTable):
             self.set_type_class('mount', extensions.mount)
 
 
-class LinuxUtilities(object):
+class LinuxUtilities(interfaces.configuration.VersionableInterface):
     """Class with multiple useful linux functions."""
+
+    _verison = (1, 0, 0)
 
     # based on __d_path from the Linux kernel
     @classmethod
