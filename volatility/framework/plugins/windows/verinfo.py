@@ -10,8 +10,8 @@ from volatility.framework import exceptions, renderers, constants, interfaces
 from volatility.framework.configuration import requirements
 from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import intermed
-from volatility.framework.symbols.windows import extensions
-from volatility.plugins.windows import pslist, moddump, modules
+from volatility.framework.symbols.windows.extensions import pe
+from volatility.plugins.windows import pslist, modules, dlllist
 
 vollog = logging.getLogger(__name__)
 
@@ -25,14 +25,16 @@ except ImportError:
 class VerInfo(interfaces.plugins.PluginInterface):
     """Lists version information from PE files."""
 
+    _required_framework_version = (2, 0, 0)
+
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
         ## TODO: we might add a regex option on the name later, but otherwise we're good
         ## TODO: and we don't want any CLI options from pslist, modules, or moddump
         return [
-            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
             requirements.PluginRequirement(name = 'modules', plugin = modules.Modules, version = (1, 0, 0)),
-            requirements.PluginRequirement(name = 'moddump', plugin = moddump.ModDump, version = (1, 0, 0)),
+            requirements.VersionRequirement(name = 'dlllist', component = dlllist.DllList, version = (2, 0, 0)),
             requirements.TranslationLayerRequirement(name = 'primary',
                                                      description = 'Memory layer for the kernel',
                                                      architectures = ["Intel32", "Intel64"]),
@@ -99,7 +101,7 @@ class VerInfo(interfaces.plugins.PluginInterface):
                                                                 self.config_path,
                                                                 "windows",
                                                                 "pe",
-                                                                class_types = extensions.pe.class_types)
+                                                                class_types = pe.class_types)
 
         for mod in mods:
             try:
@@ -107,14 +109,14 @@ class VerInfo(interfaces.plugins.PluginInterface):
             except exceptions.InvalidAddressException:
                 BaseDllName = renderers.UnreadableValue()
 
-            session_layer_name = moddump.ModDump.find_session_layer(self.context, session_layers, mod.DllBase)
+            session_layer_name = modules.Modules.find_session_layer(self.context, session_layers, mod.DllBase)
             (major, minor, product, build) = [
                 renderers.NotAvailableValue()
             ] * 4  # type: Tuple[Union[int, interfaces.renderers.BaseAbsentValue],Union[int, interfaces.renderers.BaseAbsentValue],Union[int, interfaces.renderers.BaseAbsentValue],Union[int, interfaces.renderers.BaseAbsentValue]]
             try:
                 (major, minor, product, build) = self.get_version_information(self._context, pe_table_name,
                                                                               session_layer_name, mod.DllBase)
-            except (exceptions.InvalidAddressException, ValueError, AttributeError):
+            except (exceptions.InvalidAddressException, TypeError, AttributeError):
                 (major, minor, product, build) = [renderers.UnreadableValue()] * 4
 
             # the pid and process are not applicable for kernel modules
@@ -140,6 +142,11 @@ class VerInfo(interfaces.plugins.PluginInterface):
                     BaseDllName = renderers.UnreadableValue()
 
                 try:
+                    DllBase = format_hints.Hex(entry.DllBase)
+                except exceptions.InvalidAddressException:
+                    DllBase = renderers.UnreadableValue()
+
+                try:
                     (major, minor, product, build) = self.get_version_information(self._context, pe_table_name,
                                                                                   proc_layer_name, entry.DllBase)
                 except (exceptions.InvalidAddressException, ValueError, AttributeError):
@@ -148,8 +155,8 @@ class VerInfo(interfaces.plugins.PluginInterface):
                 yield (0, (proc.UniqueProcessId,
                            proc.ImageFileName.cast("string",
                                                    max_length = proc.ImageFileName.vol.count,
-                                                   errors = "replace"), format_hints.Hex(entry.DllBase), BaseDllName,
-                           major, minor, product, build))
+                                                   errors = "replace"), DllBase, BaseDllName, major, minor, product,
+                           build))
 
     def run(self):
         procs = pslist.PsList.list_processes(self.context, self.config["primary"], self.config["nt_symbols"])
@@ -157,7 +164,7 @@ class VerInfo(interfaces.plugins.PluginInterface):
         mods = modules.Modules.list_modules(self.context, self.config["primary"], self.config["nt_symbols"])
 
         # populate the session layers for kernel modules
-        session_layers = moddump.ModDump.get_session_layers(self.context, self.config['primary'],
+        session_layers = modules.Modules.get_session_layers(self.context, self.config['primary'],
                                                             self.config['nt_symbols'])
 
         return renderers.TreeGrid([("PID", int), ("Process", str), ("Base", format_hints.Hex), ("Name", str),

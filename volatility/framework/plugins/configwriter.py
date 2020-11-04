@@ -17,6 +17,8 @@ class ConfigWriter(plugins.PluginInterface):
     """Runs the automagics and both prints and outputs configuration in the
     output directory."""
 
+    _required_framework_version = (2, 0, 0)
+
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
         return [
@@ -37,11 +39,10 @@ class ConfigWriter(plugins.PluginInterface):
             config = dict(self.context.config)
             filename = "config.extra"
         try:
-            filedata = plugins.FileInterface(filename)
-            filedata.data.write(bytes(json.dumps(config, sort_keys = True, indent = 2), 'raw_unicode_escape'))
-            self.produce_file(filedata)
-        except Exception:
-            vollog.warning("Unable to JSON encode configuration")
+            with self.open(filename) as file_data:
+                file_data.write(bytes(json.dumps(config, sort_keys = True, indent = 2), 'raw_unicode_escape'))
+        except Exception as excp:
+            vollog.warning("Unable to JSON encode configuration: {}".format(excp))
 
         for k, v in config.items():
             yield (0, (k, json.dumps(v)))

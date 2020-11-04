@@ -9,7 +9,8 @@ from Crypto.Hash import MD5, SHA256
 
 from volatility.framework import interfaces, renderers
 from volatility.framework.configuration import requirements
-from volatility.plugins.windows import hashdump, poolscanner
+from volatility.framework.symbols.windows import versions
+from volatility.plugins.windows import hashdump
 from volatility.plugins.windows.registry import hivelist
 
 vollog = logging.getLogger(__name__)
@@ -18,17 +19,18 @@ vollog = logging.getLogger(__name__)
 class Lsadump(interfaces.plugins.PluginInterface):
     """Dumps lsa secrets from memory"""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
 
     @classmethod
     def get_requirements(cls):
-        return [requirements.TranslationLayerRequirement(name = 'primary',
-                                                         description = 'Memory layer for the kernel',
-                                                         architectures = ["Intel32", "Intel64"]),
-                requirements.SymbolTableRequirement(name = "nt_symbols",
-                                                    description = "Windows kernel symbols"),
-                requirements.PluginRequirement(name = 'hivelist', plugin = hivelist.HiveList, version = (1, 0, 0))
-                ]
+        return [
+            requirements.TranslationLayerRequirement(name = 'primary',
+                                                     description = 'Memory layer for the kernel',
+                                                     architectures = ["Intel32", "Intel64"]),
+            requirements.SymbolTableRequirement(name = "nt_symbols", description = "Windows kernel symbols"),
+            requirements.PluginRequirement(name = 'hivelist', plugin = hivelist.HiveList, version = (1, 0, 0))
+        ]
 
     @classmethod
     def decrypt_aes(cls, secret, key):
@@ -44,7 +46,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
         data = b""
         for i in range(60, len(secret), 16):
             aes = AES.new(aeskey, AES.MODE_CBC, b'\x00' * 16)
-            buf = secret[i: i + 16]
+            buf = secret[i:i + 16]
             if len(buf) < 16:
                 buf += (16 - len(buf)) * "\00"
             data += aes.decrypt(buf)
@@ -99,8 +101,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
         if not enc_secret_value:
             return None
 
-        enc_secret = sechive.read(enc_secret_value.Data + 4,
-                                  enc_secret_value.DataLength)
+        enc_secret = sechive.read(enc_secret_value.Data + 4, enc_secret_value.DataLength)
         if not enc_secret:
             return None
 
@@ -130,15 +131,13 @@ class Lsadump(interfaces.plugins.PluginInterface):
             if len(key[j:j + 7]) < 7:
                 j = len(key[j:j + 7])
 
-        (dec_data_len,) = unpack("<L", decrypted_data[:4])
+        (dec_data_len, ) = unpack("<L", decrypted_data[:4])
 
         return decrypted_data[8:8 + dec_data_len]
 
     def _generator(self, syshive, sechive):
 
-        is_vista_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (6, 0),
-                                                         fallback_checks = [("KdCopyDataBlock", None, True)])
-        vista_or_later = is_vista_or_later(context = self.context, symbol_table = self.config['nt_symbols'])
+        vista_or_later = versions.is_vista_or_later(context = self.context, symbol_table = self.config['nt_symbols'])
 
         bootkey = hashdump.Hashdump.get_bootkey(syshive)
         lsakey = self.get_lsa_key(sechive, bootkey, vista_or_later)
@@ -162,8 +161,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
             if not enc_secret_value:
                 continue
 
-            enc_secret = sechive.read(enc_secret_value.Data + 4,
-                                      enc_secret_value.DataLength)
+            enc_secret = sechive.read(enc_secret_value.Data + 4, enc_secret_value.DataLength)
             if not enc_secret:
                 continue
             if not vista_or_later:
@@ -188,5 +186,4 @@ class Lsadump(interfaces.plugins.PluginInterface):
             if hive.get_name().split('\\')[-1].upper() == 'SECURITY':
                 sechive = hive
 
-        return renderers.TreeGrid([("Key", str), ("Secret", str), ('Hex', bytes)],
-                                  self._generator(syshive, sechive))
+        return renderers.TreeGrid([("Key", str), ("Secret", str), ('Hex', bytes)], self._generator(syshive, sechive))

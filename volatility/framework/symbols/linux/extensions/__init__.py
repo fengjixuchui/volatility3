@@ -9,8 +9,8 @@ from typing import Generator, Iterable, Iterator, Optional, Tuple
 from volatility.framework import constants
 from volatility.framework import exceptions, objects, interfaces, symbols
 from volatility.framework.layers import linear
-from volatility.framework.symbols import generic, linux
 from volatility.framework.objects import utility
+from volatility.framework.symbols import generic, linux
 from volatility.framework.symbols import intermed
 from volatility.framework.symbols.linux import extensions
 from volatility.framework.symbols.linux.extensions import elf
@@ -154,10 +154,10 @@ class module(generic.GenericIntelProcess):
 
     @property
     def section_strtab(self):
-        #Newer kernels
+        # Newer kernels
         if self.has_member("kallsyms"):
             return self.kallsyms.strtab
-        #Older kernels
+        # Older kernels
         elif self.has_member("strtab"):
             strtab = self.strtab
 
@@ -363,13 +363,13 @@ class qstr(objects.StructType):
 
     def name_as_str(self) -> str:
         if self.has_member("len"):
-            str_length = self.len
+            str_length = self.len + 1  # Maximum length should include null terminator
         else:
             str_length = 255
 
         try:
             ret = objects.utility.pointer_to_string(self.name, str_length)
-        except exceptions.InvalidAddressException:
+        except (exceptions.InvalidAddressException, ValueError):
             ret = ""
 
         return ret

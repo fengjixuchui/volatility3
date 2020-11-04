@@ -1,7 +1,6 @@
 # This file is Copyright 2019 Volatility Foundation and licensed under the Volatility Software License 1.0
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
-
 import datetime
 import json
 import logging
@@ -305,6 +304,7 @@ class JsonRenderer(CLIRenderer):
     _type_renderers = {
         format_hints.HexBytes: quoted_optional(hex_bytes_as_text),
         interfaces.renderers.Disassembly: quoted_optional(display_disassembly),
+        bytes: optional(lambda x: " ".join(["{0:02x}".format(b) for b in x])),
         datetime.datetime: lambda x: x.isoformat() if not isinstance(x, interfaces.renderers.BaseAbsentValue) else None,
         'default': lambda x: x
     }
@@ -327,8 +327,7 @@ class JsonRenderer(CLIRenderer):
             {}, [])  # type: Tuple[Dict[str, List[interfaces.renderers.TreeNode]], List[interfaces.renderers.TreeNode]]
 
         def visitor(
-                node: interfaces.renderers.TreeNode,
-                accumulator: Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]
+                node: interfaces.renderers.TreeNode, accumulator: Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]
         ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
             # Nodes always have a path value, giving them a path_depth of at least 1, we use max just in case
             acc_map, final_tree = accumulator

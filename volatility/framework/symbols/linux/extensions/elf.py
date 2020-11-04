@@ -3,8 +3,10 @@
 #
 
 from typing import Dict, Tuple
+
 from volatility.framework import constants
 from volatility.framework import objects, interfaces
+
 
 class elf(objects.StructType):
     '''
@@ -126,7 +128,7 @@ class elf(objects.StructType):
 
             break
 
-        if dt_strtab == None or dt_symtab == None or dt_strent == None:
+        if dt_strtab is None or dt_symtab is None or dt_strent is None:
             return None
 
         self._cached_symtab = dt_symtab
@@ -139,10 +141,10 @@ class elf(objects.StructType):
             self._cached_numsyms = 1024
 
     def get_symbols(self):
-        if self._cached_symtab == None:
+        if self._cached_symtab is None:
             self._find_symbols()
 
-        if self._cached_symtab == None:
+        if self._cached_symtab is None:
             return
 
         symtab_arr = self._context.object(

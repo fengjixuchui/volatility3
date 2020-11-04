@@ -12,7 +12,7 @@ from volatility.framework.interfaces import plugins, configuration
 from volatility.framework.layers import scanners
 from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import intermed
-from volatility.framework.symbols.windows import extensions
+from volatility.framework.symbols.windows import extensions, versions
 from volatility.plugins.windows import handles
 
 vollog = logging.getLogger(__name__)
@@ -111,78 +111,11 @@ class PoolHeaderScanner(interfaces.layers.ScannerInterface):
             yield (constraint, header)
 
 
-def os_distinguisher(
-        version_check: Callable[[Tuple[int, ...]], bool],
-        fallback_checks: List[Tuple[str, Optional[str],
-                                    bool]]) -> Callable[[interfaces.context.ContextInterface, str], bool]:
-    """Distinguishes a symbol table as being above a particular version or
-    point.
-
-    This will primarily check the version metadata first and foremost.
-    If that metadata isn't available then each item in the fallback_checks is tested.
-    If invert is specified then the result will be true if the version is less than that specified, or in the case of
-    fallback, if any of the fallback checks is successful.
-
-    A fallback check is made up of:
-     * a symbol or type name
-     * a member name (implying that the value before was a type name)
-     * whether that symbol, type or member must be present or absent for the symbol table to be more above the required point
-
-    Note:
-        Specifying that a member must not be present includes the whole type not being present too (ie, either will pass the test)
-
-    Args:
-        version_check: Function that takes a 4-tuple version and returns whether whether the provided version is above a particular point
-        fallback_checks: A list of symbol/types/members of types, and whether they must be present to be above the required point
-
-    Returns:
-        A function that takes a context and a symbol table name and determines whether that symbol table passes the distinguishing checks
-    """
-
-    # try the primary method based on the pe version in the ISF
-    def method(context: interfaces.context.ContextInterface, symbol_table: str) -> bool:
-        """
-
-        Args:
-            context: The context that contains the symbol table named `symbol_table`
-            symbol_table: Name of the symbol table within the context to distinguish the version of
-
-        Returns:
-            True if the symbol table is of the required version
-        """
-
-        try:
-            pe_version = context.symbol_space[symbol_table].metadata.pe_version
-            major, minor, revision, build = pe_version
-            return version_check((major, minor, revision, build))
-        except (AttributeError, ValueError, TypeError):
-            vollog.log(constants.LOGLEVEL_VVV, "Windows PE version data is not available")
-
-        # fall back to the backup method, if necessary
-        for name, member, response in fallback_checks:
-            if member is None:
-                if (context.symbol_space.has_symbol(symbol_table + constants.BANG + name)
-                    or context.symbol_space.has_type(symbol_table + constants.BANG + name)) != response:
-                    return False
-            else:
-                try:
-                    symbol_type = context.symbol_space.get_type(symbol_table + constants.BANG + name)
-                    if symbol_type.has_member(member) != response:
-                        return False
-                except exceptions.SymbolError:
-                    if not response:
-                        return False
-
-        return True
-
-    return method
-
-
 class PoolScanner(plugins.PluginInterface):
     """A generic pool scanner plugin."""
 
     _version = (1, 0, 0)
-    _required_framework_version = (1, 2, 0)
+    _required_framework_version = (2, 0, 0)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -193,18 +126,6 @@ class PoolScanner(plugins.PluginInterface):
             requirements.SymbolTableRequirement(name = "nt_symbols", description = "Windows kernel symbols"),
             requirements.PluginRequirement(name = 'handles', plugin = handles.Handles, version = (1, 0, 0)),
         ]
-
-    is_windows_10 = os_distinguisher(version_check = lambda x: x >= (10, 0),
-                                     fallback_checks = [("ObHeaderCookie", None, True)])
-    is_windows_8_or_later = os_distinguisher(version_check = lambda x: x >= (6, 2),
-                                             fallback_checks = [("_HANDLE_TABLE", "HandleCount", False)])
-    # Technically, this is win7 or less
-    is_windows_7 = os_distinguisher(version_check = lambda x: x == (6, 1),
-                                    fallback_checks = [("_OBJECT_HEADER", "TypeIndex", True),
-                                                       ("_HANDLE_TABLE", "HandleCount", True)])
-
-    is_vista_or_later = os_distinguisher(version_check = lambda x: x >= (6, 0),
-                                         fallback_checks = [("KdCopyDataBlock", None, True)])
 
     def _generator(self):
 
@@ -355,8 +276,8 @@ class PoolScanner(plugins.PluginInterface):
 
         cookie = handles.Handles.find_cookie(context = context, layer_name = layer_name, symbol_table = symbol_table)
 
-        is_windows_10 = cls.is_windows_10(context, symbol_table)
-        is_windows_8_or_later = cls.is_windows_8_or_later(context, symbol_table)
+        is_windows_10 = versions.is_windows_10(context, symbol_table)
+        is_windows_8_or_later = versions.is_windows_8_or_later(context, symbol_table)
 
         # start off with the primary virtual layer
         scan_layer = layer_name
@@ -450,7 +371,7 @@ class PoolScanner(plugins.PluginInterface):
             # We have to manually load a symbol table
 
             if symbols.symbol_table_is_64bit(context, symbol_table):
-                is_win_7 = cls.is_windows_7(context, symbol_table)
+                is_win_7 = versions.is_windows_7(context, symbol_table)
                 if is_win_7:
                     pool_header_json_filename = "poolheader-x64-win7"
                 else:
@@ -459,19 +380,20 @@ class PoolScanner(plugins.PluginInterface):
                 pool_header_json_filename = "poolheader-x86"
 
             # set the class_type to match the normal WindowsKernelIntermedSymbols
-            is_vista_or_later = cls.is_vista_or_later(context, symbol_table)
+            is_vista_or_later = versions.is_vista_or_later(context, symbol_table)
             if is_vista_or_later:
                 class_type = extensions.pool.POOL_HEADER_VISTA
             else:
                 class_type = extensions.pool.POOL_HEADER
 
-            table_name = intermed.IntermediateSymbolTable.create(
-                context = context,
-                config_path = configuration.path_join(context.symbol_space[symbol_table].config_path, "poolheader"),
-                sub_path = "windows",
-                filename = pool_header_json_filename,
-                table_mapping = {'nt_symbols': symbol_table},
-                class_types = {'_POOL_HEADER': class_type})
+            table_name = intermed.IntermediateSymbolTable.create(context = context,
+                                                                 config_path = configuration.path_join(
+                                                                     context.symbol_space[symbol_table].config_path,
+                                                                     "poolheader"),
+                                                                 sub_path = "windows",
+                                                                 filename = pool_header_json_filename,
+                                                                 table_mapping = {'nt_symbols': symbol_table},
+                                                                 class_types = {'_POOL_HEADER': class_type})
         return table_name
 
     def run(self) -> renderers.TreeGrid:

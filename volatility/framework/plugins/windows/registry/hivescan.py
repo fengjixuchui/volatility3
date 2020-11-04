@@ -7,6 +7,7 @@ from typing import Iterable
 from volatility.framework import renderers, interfaces, symbols
 from volatility.framework.configuration import requirements
 from volatility.framework.renderers import format_hints
+from volatility.framework.symbols.windows import versions
 from volatility.plugins.windows import poolscanner, bigpools
 
 
@@ -14,10 +15,8 @@ class HiveScan(interfaces.plugins.PluginInterface):
     """Scans for registry hives present in a particular windows memory
     image."""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
-
-    is_windows_8_1_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (6, 3),
-                                                           fallback_checks = [("_KPRCB", "PendingTickFlags", True)])
 
     @classmethod
     def get_requirements(cls):
@@ -48,7 +47,7 @@ class HiveScan(interfaces.plugins.PluginInterface):
         """
 
         is_64bit = symbols.symbol_table_is_64bit(context, symbol_table)
-        is_windows_8_1_or_later = HiveScan.is_windows_8_1_or_later(context = context, symbol_table = symbol_table)
+        is_windows_8_1_or_later = versions.is_windows_8_1_or_later(context = context, symbol_table = symbol_table)
 
         if is_windows_8_1_or_later and is_64bit:
             kvo = context.layers[layer_name].config['kernel_virtual_offset']

@@ -13,6 +13,8 @@ from volatility.framework.renderers import format_hints
 class Lsmod(plugins.PluginInterface):
     """Lists loaded kernel modules."""
 
+    _required_framework_version = (2, 0, 0)
+
     _version = (1, 0, 0)
 
     @classmethod
@@ -21,7 +23,7 @@ class Lsmod(plugins.PluginInterface):
             requirements.TranslationLayerRequirement(name = 'primary',
                                                      description = 'Memory layer for the kernel',
                                                      architectures = ["Intel32", "Intel64"]),
-            requirements.SymbolTableRequirement(name = "darwin", description = "Linux kernel symbols")
+            requirements.SymbolTableRequirement(name = "darwin", description = "Mac kernel")
         ]
 
     @classmethod

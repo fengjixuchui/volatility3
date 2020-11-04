@@ -10,6 +10,7 @@ from volatility.framework.configuration import requirements
 from volatility.framework.layers import scanners
 from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import intermed
+from volatility.framework.symbols.windows import versions
 from volatility.framework.symbols.windows.extensions import services
 from volatility.plugins.windows import poolscanner, vadyarascan, pslist
 
@@ -19,36 +20,8 @@ vollog = logging.getLogger(__name__)
 class SvcScan(interfaces.plugins.PluginInterface):
     """Scans for windows services."""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
-
-    is_vista_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (6, 0),
-                                                     fallback_checks = [("KdCopyDataBlock", None, True)])
-
-    is_windows_xp = poolscanner.os_distinguisher(version_check = lambda x: (5, 1) <= x < (5, 2),
-                                                 fallback_checks = [("KdCopyDataBlock", None, False),
-                                                                    ("_HANDLE_TABLE", "HandleCount", True)])
-
-    is_xp_or_2003 = poolscanner.os_distinguisher(version_check = lambda x: (5, 1) <= x < (6, 0),
-                                                 fallback_checks = [("KdCopyDataBlock", None, False),
-                                                                    ("_HANDLE_TABLE", "HandleCount", True)])
-
-    is_win10_up_to_15063 = poolscanner.os_distinguisher(version_check = lambda x: (10, 0) <= x < (10, 0, 15063),
-                                                        fallback_checks = [("ObHeaderCookie", None, True),
-                                                                           ("_HANDLE_TABLE", "HandleCount", False),
-                                                                           ("_EPROCESS", "KeepAliveCounter", True)])
-
-    is_win10_15063 = poolscanner.os_distinguisher(version_check = lambda x: x == (10, 0, 15063),
-                                                  fallback_checks = [("ObHeaderCookie", None, True),
-                                                                     ("_HANDLE_TABLE", "HandleCount", False),
-                                                                     ("_EPROCESS", "KeepAliveCounter", False),
-                                                                     ("_EPROCESS", "ControlFlowGuardEnabled", True)])
-
-    is_win10_16299_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (10, 0, 16299),
-                                                           fallback_checks = [("ObHeaderCookie", None, True),
-                                                                              ("_HANDLE_TABLE", "HandleCount", False),
-                                                                              ("_EPROCESS", "KeepAliveCounter", False),
-                                                                              ("_EPROCESS", "ControlFlowGuardEnabled",
-                                                                               False)])
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -58,7 +31,7 @@ class SvcScan(interfaces.plugins.PluginInterface):
                                                      description = 'Memory layer for the kernel',
                                                      architectures = ["Intel32", "Intel64"]),
             requirements.SymbolTableRequirement(name = "nt_symbols", description = "Windows kernel symbols"),
-            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
             requirements.PluginRequirement(name = 'poolscanner', plugin = poolscanner.PoolScanner, version = (1, 0, 0)),
             requirements.PluginRequirement(name = 'vadyarascan', plugin = vadyarascan.VadYaraScan, version = (1, 0, 0))
         ]
@@ -85,30 +58,29 @@ class SvcScan(interfaces.plugins.PluginInterface):
         native_types = context.symbol_space[symbol_table].natives
         is_64bit = symbols.symbol_table_is_64bit(context, symbol_table)
 
-        if SvcScan.is_windows_xp(context = context, symbol_table = symbol_table) and not is_64bit:
+        if versions.is_windows_xp(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-xp-x86"
-        elif SvcScan.is_xp_or_2003(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_xp_or_2003(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-xp-2003-x64"
-        elif SvcScan.is_win10_16299_or_later(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_win10_16299_or_later(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-win10-16299-x64"
-        elif SvcScan.is_win10_16299_or_later(context = context, symbol_table = symbol_table) and not is_64bit:
+        elif versions.is_win10_16299_or_later(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-win10-16299-x86"
-        elif SvcScan.is_win10_up_to_15063(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_win10_up_to_15063(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-win8-x64"
-        elif SvcScan.is_win10_up_to_15063(context = context, symbol_table = symbol_table) and not is_64bit:
+        elif versions.is_win10_up_to_15063(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-win8-x86"
-        elif SvcScan.is_win10_15063(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_win10_15063(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-win10-15063-x64"
-        elif SvcScan.is_win10_15063(context = context, symbol_table = symbol_table) and not is_64bit:
+        elif versions.is_win10_15063(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-win10-15063-x86"
-        elif poolscanner.PoolScanner.is_windows_8_or_later(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_windows_8_or_later(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-win8-x64"
-        elif poolscanner.PoolScanner.is_windows_8_or_later(context = context,
-                                                           symbol_table = symbol_table) and not is_64bit:
+        elif versions.is_windows_8_or_later(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-win8-x86"
-        elif SvcScan.is_vista_or_later(context = context, symbol_table = symbol_table) and is_64bit:
+        elif versions.is_vista_or_later(context = context, symbol_table = symbol_table) and is_64bit:
             symbol_filename = "services-vista-x64"
-        elif SvcScan.is_vista_or_later(context = context, symbol_table = symbol_table) and not is_64bit:
+        elif versions.is_vista_or_later(context = context, symbol_table = symbol_table) and not is_64bit:
             symbol_filename = "services-vista-x86"
         else:
             raise NotImplementedError("This version of Windows is not supported!")
@@ -129,7 +101,7 @@ class SvcScan(interfaces.plugins.PluginInterface):
 
         filter_func = pslist.PsList.create_name_filter(["services.exe"])
 
-        is_vista_or_later = SvcScan.is_vista_or_later(context = self.context, symbol_table = self.config["nt_symbols"])
+        is_vista_or_later = versions.is_vista_or_later(context = self.context, symbol_table = self.config["nt_symbols"])
 
         if is_vista_or_later:
             service_tag = b"serH"

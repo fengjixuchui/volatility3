@@ -2,71 +2,26 @@
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 
-import enum
-import itertools
 import logging
 import socket
+from typing import Dict, Tuple, List, Union
 
-from volatility.framework import objects, interfaces, exceptions
 from volatility.framework import exceptions
+from volatility.framework import objects, interfaces
 from volatility.framework.objects import Array
 from volatility.framework.renderers import conversion
-from volatility.framework.symbols.wrappers import Flags
-from volatility.framework import renderers
-from typing import Dict, Tuple
 
 vollog = logging.getLogger(__name__)
 
-def inet_ntop(address_family: int, packed_ip: Array) -> str:
 
-    def inet_ntop4(packed_ip: Array) -> str:
-
-        if not (isinstance(packed_ip, list) or isinstance(packed_ip, Array)):
-            raise TypeError("must be Array, not {0}".format(type(packed_ip)))
-        if len(packed_ip) != 4:
-            raise ValueError("invalid length of packed IP address string")
-        return "{0}.{1}.{2}.{3}".format(*[x.to_bytes(1, "little")[0] for x in packed_ip])
-
-    def inet_ntop6(packed_ip) -> str:
-        if not (isinstance(packed_ip, list) or isinstance(packed_ip, Array)):
-            raise TypeError("must be Array, not {0}".format(type(packed_ip)))
-
-        if len(packed_ip) != 16:
-            raise ValueError("invalid length of packed IP address string")
-
-        words = []
-        for i in range(0, 16, 2):
-            words.append((packed_ip[i] << 8) | packed_ip[i + 1])
-
-        # Replace a run of 0x00s with None
-        numlen = [(k, len(list(g))) for k, g in itertools.groupby(words)]
-        max_zero_run = sorted(sorted(numlen, key = lambda x: x[1], reverse = True), key = lambda x: x[0])[0]
-        words = []
-        for k, l in numlen:
-            if (k == 0) and (l == max_zero_run[1]) and not (None in words):
-                words.append(None)
-            else:
-                for i in range(l):
-                    words.append(k)
-
-        # Handle encapsulated IPv4 addresses
-        encapsulated = ""
-        if (words[0] is None) and (len(words) == 3 or (len(words) == 4 and words[1] == 0xffff)):
-            words = words[:-2]
-            encapsulated = inet_ntop4(packed_ip[-4:])
-        # If we start or end with None, then add an additional :
-        if words[0] is None:
-            words = [None] + words
-        if words[-1] is None:
-            words += [None]
-        # Join up everything we've got using :s
-        return ":".join(["{0:x}".format(w) if w is not None else "" for w in words]) + encapsulated
-
-    if address_family == socket.AF_INET:
-        return inet_ntop4(packed_ip)
-    elif address_family == socket.AF_INET6:
-        return inet_ntop6(packed_ip)
+def inet_ntop(address_family: int, packed_ip: Union[List[int], Array]) -> str:
+    if address_family in [socket.AF_INET6, socket.AF_INET]:
+        try:
+            return socket.inet_ntop(address_family, bytes(packed_ip))
+        except AttributeError:
+            raise RuntimeError("This version of python does not have socket.inet_ntop, please upgrade")
     raise socket.error("[Errno 97] Address family not supported by protocol")
+
 
 # Python's socket.AF_INET6 is 0x1e but Microsoft defines it
 # as a constant value of 0x17 in their source code. Thus we
@@ -77,6 +32,7 @@ AF_INET6 = 0x17
 # String representations of INADDR_ANY and INADDR6_ANY
 inaddr_any = inet_ntop(socket.AF_INET, [0] * 4)
 inaddr6_any = inet_ntop(socket.AF_INET6, [0] * 16)
+
 
 class _TCP_LISTENER(objects.StructType):
     """Class for objects found in TcpL pools.
@@ -132,8 +88,9 @@ class _TCP_LISTENER(objects.StructType):
     def get_owner_procname(self):
         if self.get_owner().is_valid():
             if self.get_owner().has_valid_member("ImageFileName"):
-                return self.get_owner().ImageFileName.cast(
-                        "string", max_length = self.get_owner().ImageFileName.vol.count, errors = "replace")
+                return self.get_owner().ImageFileName.cast("string",
+                                                           max_length = self.get_owner().ImageFileName.vol.count,
+                                                           errors = "replace")
 
         return None
 
@@ -196,6 +153,7 @@ class _TCP_LISTENER(objects.StructType):
             return False
         return True
 
+
 class _TCP_ENDPOINT(_TCP_LISTENER):
     """Class for objects found in TcpE pools"""
 
@@ -208,8 +166,7 @@ class _TCP_ENDPOINT(_TCP_LISTENER):
 
     def get_local_address(self):
         try:
-            inaddr = self.AddrInfo.dereference().Local.\
-                                pData.dereference().dereference()
+            inaddr = self.AddrInfo.dereference().Local.pData.dereference().dereference()
 
             return self._ipv4_or_ipv6(inaddr)
 
@@ -218,8 +175,7 @@ class _TCP_ENDPOINT(_TCP_LISTENER):
 
     def get_remote_address(self):
         try:
-            inaddr = self.AddrInfo.dereference().\
-                                Remote.dereference()
+            inaddr = self.AddrInfo.dereference().Remote.dereference()
 
             return self._ipv4_or_ipv6(inaddr)
 
@@ -237,7 +193,8 @@ class _TCP_ENDPOINT(_TCP_LISTENER):
                 vollog.debug("invalid due to invalid address_family {}".format(self.get_address_family()))
                 return False
 
-            if not self.get_local_address() and (not self.get_owner() or self.get_owner().UniqueProcessId == 0 or self.get_owner().UniqueProcessId > 65535):
+            if not self.get_local_address() and (not self.get_owner() or self.get_owner().UniqueProcessId == 0
+                                                 or self.get_owner().UniqueProcessId > 65535):
                 vollog.debug("invalid due to invalid owner data")
                 return False
 
@@ -247,8 +204,10 @@ class _TCP_ENDPOINT(_TCP_LISTENER):
 
         return True
 
+
 class _UDP_ENDPOINT(_TCP_LISTENER):
     """Class for objects found in UdpA pools"""
+
 
 class _LOCAL_ADDRESS(objects.StructType):
 
@@ -256,11 +215,13 @@ class _LOCAL_ADDRESS(objects.StructType):
     def inaddr(self):
         return self.pData.dereference().dereference()
 
+
 class _LOCAL_ADDRESS_WIN10_UDP(objects.StructType):
 
     @property
     def inaddr(self):
         return self.pData.dereference()
+
 
 win10_x64_class_types = {
     '_TCP_ENDPOINT': _TCP_ENDPOINT,

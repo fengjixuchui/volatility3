@@ -42,7 +42,7 @@ class VolShell(cli.CommandLine):
         determining the plugin to run and then running it."""
         sys.stdout.write("Volshell (Volatility 3 Framework) {}\n".format(constants.PACKAGE_VERSION))
 
-        framework.require_interface_version(1, 0, 0)
+        framework.require_interface_version(2, 0, 0)
 
         parser = argparse.ArgumentParser(prog = 'volshell',
                                          description = "A tool for interactivate forensic analysis of memory images")
@@ -224,7 +224,8 @@ class VolShell(cli.CommandLine):
             if args.quiet:
                 progress_callback = cli.MuteProgress()
 
-            constructed = plugins.construct_plugin(ctx, automagics, plugin, base_config_path, progress_callback, self)
+            constructed = plugins.construct_plugin(ctx, automagics, plugin, base_config_path, progress_callback,
+                                                   self.file_handler_class_factory())
 
             if args.write_config:
                 vollog.debug("Writing out configuration data to config.json")

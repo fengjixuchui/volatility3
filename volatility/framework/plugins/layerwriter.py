@@ -3,8 +3,7 @@
 #
 
 import logging
-import os
-from typing import List, Optional
+from typing import List, Optional, Type
 
 from volatility.framework import renderers, interfaces, constants, exceptions
 from volatility.framework.configuration import requirements
@@ -16,10 +15,10 @@ vollog = logging.getLogger(__name__)
 class LayerWriter(plugins.PluginInterface):
     """Runs the automagics and writes out the primary layer produced by the stacker."""
 
-    default_output_name = "output.raw"
     default_block_size = 0x500000
 
-    _version = (1, 0, 0)
+    _required_framework_version = (2, 0, 0)
+    _version = (2, 0, 0)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -27,30 +26,38 @@ class LayerWriter(plugins.PluginInterface):
             requirements.TranslationLayerRequirement(name = 'primary',
                                                      description = 'Memory layer for the kernel',
                                                      architectures = ["Intel32", "Intel64"]),
-            requirements.StringRequirement(name = 'output',
-                                           description = 'Filename to output the chosen layer',
-                                           optional = True,
-                                           default = cls.default_output_name),
             requirements.IntRequirement(name = 'block_size',
                                         description = "Size of blocks to copy over",
                                         default = cls.default_block_size,
-                                        optional = True)
+                                        optional = True),
+            requirements.BooleanRequirement(name = 'list',
+                                            description = 'List available layers',
+                                            default = False,
+                                            optional = True),
+            requirements.ListRequirement(name = 'layers',
+                                         element_type = str,
+                                         description = 'Names of layer to write',
+                                         default = None,
+                                         optional = True)
         ]
 
     @classmethod
-    def write_layer(cls,
-                    context: interfaces.context.ContextInterface,
-                    layer_name: str,
-                    preferred_name: str,
-                    chunk_size: Optional[int] = None,
-                    progress_callback: Optional[constants.ProgressCallback] = None) -> Optional[plugins.FileInterface]:
-        """Produces a filedata from the named layer in the provided context
+    def write_layer(
+            cls,
+            context: interfaces.context.ContextInterface,
+            layer_name: str,
+            preferred_name: str,
+            open_method: Type[plugins.FileHandlerInterface],
+            chunk_size: Optional[int] = None,
+            progress_callback: Optional[constants.ProgressCallback] = None) -> Optional[plugins.FileHandlerInterface]:
+        """Produces a FileHandler from the named layer in the provided context or None on failure
 
         Args:
             context: the context from which to read the memory layer
             layer_name: the name of the layer to write out
             preferred_name: a string with the preferred filename for hte file
             chunk_size: an optional size for the chunks that should be written (defaults to 0x500000)
+            open_method: class for creating FileHandler context managers
             progress_callback: an optional function that takes a percentage and a string that displays output
         """
 
@@ -61,31 +68,54 @@ class LayerWriter(plugins.PluginInterface):
         if chunk_size is None:
             chunk_size = cls.default_block_size
 
-        filedata = plugins.FileInterface(preferred_name)
+        file_handle = open_method(preferred_name)
         for i in range(0, layer.maximum_address, chunk_size):
             current_chunk_size = min(chunk_size, layer.maximum_address - i)
             data = layer.read(i, current_chunk_size, pad = True)
-            filedata.data.write(data)
+            file_handle.write(data)
             if progress_callback:
                 progress_callback((i / layer.maximum_address) * 100, 'Writing layer {}'.format(layer_name))
-        return filedata
+        return file_handle
 
     def _generator(self):
-        if self.config['primary'] not in self.context.layers:
-            yield 0, ('Layer Name does not exist', )
-        elif os.path.exists(self.config.get('output', self.default_output_name)):
-            yield 0, ('Refusing to overwrite existing output file', )
+        if self.config['list']:
+            for name in self.context.layers:
+                yield 0, (name,)
         else:
-            output_name = self.config.get('output', self.default_output_name)
-            try:
-                filedata = self.write_layer(self.context, self.config['primary'], output_name,
-                                            self.config.get('block_size', self.default_block_size),
-                                            self._progress_callback)
-                self.produce_file(filedata)
-            except IOError as excp:
-                yield 0, ('Layer cannot be written to {}: {}'.format(self.config['output_name'], excp), )
+            import pdb
+            pdb.set_trace()
+            # Choose the most recently added layer that isn't virtual
+            if self.config['layers'] is None:
+                self.config['layers'] = []
+                for name in self.context.layers:
+                    if not self.context.layers[name].metadata.get('mapped', False):
+                        self.config['layers'] = [name]
 
-            yield 0, ('Layer has been written to {}'.format(output_name), )
+            for name in self.config['layers']:
+                # Check the layer exists and validate the output file
+                if name not in self.context.layers:
+                    yield 0, ('Layer Name {} does not exist'.format(name),)
+                else:
+                    output_name = self.config.get('output', ".".join([name, "raw"]))
+                    try:
+                        file_handle = self.write_layer(self.context,
+                                                       name,
+                                                       output_name,
+                                                       self.open,
+                                                       self.config.get('block_size', self.default_block_size),
+                                                       progress_callback = self._progress_callback)
+                        file_handle.close()
+                    except IOError as excp:
+                        yield 0, ('Layer cannot be written to {}: {}'.format(self.config['output_name'], excp),)
+
+                    yield 0, ('Layer has been written to {}'.format(output_name),)
+
+    def _generate_layers(self):
+        """List layer names from this run"""
+        for name in self.context.layers:
+            yield (0, (name,))
 
     def run(self):
+        if self.config['list']:
+            return renderers.TreeGrid([("Layer name", str)], self._generate_layers())
         return renderers.TreeGrid([("Status", str)], self._generator())

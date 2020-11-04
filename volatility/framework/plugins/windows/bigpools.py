@@ -7,11 +7,11 @@ from typing import List, Optional, Tuple, Iterator
 
 from volatility.framework import interfaces, renderers, exceptions, symbols
 from volatility.framework.configuration import requirements
-from volatility.framework.renderers import format_hints
 from volatility.framework.interfaces import configuration
+from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import intermed
 from volatility.framework.symbols.windows import extensions
-from volatility.plugins.windows import poolscanner
+from volatility.framework.symbols.windows import versions
 
 vollog = logging.getLogger(__name__)
 
@@ -19,14 +19,8 @@ vollog = logging.getLogger(__name__)
 class BigPools(interfaces.plugins.PluginInterface):
     """List big page pools."""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
-
-    is_vista_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (6, 0),
-                                                     fallback_checks = [("KdCopyDataBlock", None, True)])
-
-    is_win10 = poolscanner.os_distinguisher(version_check = lambda x: (10, 0) <= x,
-                                            fallback_checks = [("ObHeaderCookie", None, True),
-                                                               ("_HANDLE_TABLE", "HandleCount", False)])
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -72,8 +66,8 @@ class BigPools(interfaces.plugins.PluginInterface):
             big_page_table_type = ntkrnlmp.get_type("_POOL_TRACKER_BIG_PAGES")
         except exceptions.SymbolError:
             # We have to manually load a symbol table
-            is_vista_or_later = cls.is_vista_or_later(context, symbol_table)
-            is_win10 = cls.is_win10(context, symbol_table)
+            is_vista_or_later = versions.is_vista_or_later(context, symbol_table)
+            is_win10 = versions.is_win10(context, symbol_table)
             if is_win10:
                 big_pools_json_filename = "bigpools-win10"
             elif is_vista_or_later:

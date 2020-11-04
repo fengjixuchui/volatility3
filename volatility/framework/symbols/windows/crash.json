@@ -2,7 +2,7 @@
   "symbols": {
   },
   "user_types": {
-    "_DMP_HEADER": {
+    "_DUMP_HEADER": {
       "fields": {
         "Signature": {
           "offset": 0,
@@ -14,7 +14,7 @@
               "name": "unsigned char"
             }
           }
-        }, 
+        },
         "ValidDump": {
           "offset": 4,
           "type": {
@@ -56,35 +56,35 @@
         },
         "PsLoadedModuleList": {
           "offset": 24,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "PsActiveProcessHead": {
           "offset": 28,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "MachineImageType": {
           "offset": 32,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "NumberProcessors": {
           "offset": 36,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "BugCheckCode": {
           "offset": 40,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
@@ -124,7 +124,7 @@
             "kind": "base",
             "name": "unsigned char"
           }
-        }, 
+        },
         "VersionUser2": {
           "offset": 94,
           "type": {
@@ -135,7 +135,7 @@
               "name": "unsigned char"
             }
           }
-        }, 
+        },
         "KdDebuggerDataBlock": {
           "offset": 96,
           "type": {
@@ -170,7 +170,7 @@
         },
         "Comment": {
           "offset": 2080,
-          "type": { 
+          "type": {
             "count": 128,
             "kind": "array",
             "subtype": {
@@ -202,42 +202,42 @@
         },
         "ProductType": {
           "offset": 3988,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "SuiteMask": {
           "offset": 3992,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "WriterStatus": {
           "offset": 3996,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
           }
         },
         "RequiredDumpSpace": {
           "offset": 4000,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long long"
           }
         },
         "SystemUpTime": {
           "offset": 4024,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long long"
           }
         },
         "SystemTime": {
           "offset": 4032,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long long"
           }
@@ -275,10 +275,10 @@
         },
         "ExceptionRecord": {
           "offset": 8,
-          "type": { 
+          "type": {
             "kind": "base",
             "name": "unsigned long"
-          } 
+          }
         },
         "ExceptionAddress": {
           "offset": 12,

@@ -3,9 +3,9 @@
 #
 
 import logging
-from typing import Callable, List, Generator, Iterable
+from typing import Callable, List, Generator, Iterable, Type, Optional
 
-from volatility.framework import renderers, interfaces
+from volatility.framework import renderers, interfaces, exceptions
 from volatility.framework.configuration import requirements
 from volatility.framework.objects import utility
 from volatility.framework.renderers import format_hints
@@ -33,7 +33,9 @@ winnt_protections = {
 class VadInfo(interfaces.plugins.PluginInterface):
     """Lists process memory ranges."""
 
-    _version = (1, 0, 0)
+    _required_framework_version = (2, 0, 0)
+    _version = (2, 0, 0)
+    MAXSIZE_DEFAULT = 0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -56,7 +58,16 @@ class VadInfo(interfaces.plugins.PluginInterface):
                                              description = 'Filter on specific process IDs',
                                              element_type = int,
                                              optional = True),
-                requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
+                requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
+                requirements.BooleanRequirement(name = 'dump',
+                                                description = "Extract listed memory ranges",
+                                                default = False,
+                                                optional = True),
+                requirements.IntRequirement(name = 'maxsize',
+                                            description = "Maximum size for dumped VAD sections " \
+                                                          "(all the bigger sections will be ignored)",
+                                            default = cls.MAXSIZE_DEFAULT,
+                                            optional = True),
                 ]
 
     @classmethod
@@ -96,29 +107,100 @@ class VadInfo(interfaces.plugins.PluginInterface):
             if not filter_func(vad):
                 yield vad
 
+    @classmethod
+    def vad_dump(cls,
+                 context: interfaces.context.ContextInterface,
+                 proc: interfaces.objects.ObjectInterface,
+                 vad: interfaces.objects.ObjectInterface,
+                 open_method: Type[
+                     interfaces.plugins.FileHandlerInterface],
+                 maxsize: int = MAXSIZE_DEFAULT) -> Optional[interfaces.plugins.FileHandlerInterface]:
+        """Extracts the complete data for Vad as a FileInterface.
+
+        Args:
+            context: The context to retrieve required elements (layers, symbol tables) from
+            proc: an _EPROCESS instance
+            vad: The suspected VAD to extract (ObjectInterface)
+            open_method: class to provide context manager for opening the file
+            maxsize: Max size of VAD section (default MAXSIZE_DEFAULT)
+
+        Returns:
+            An open FileInterface object containing the complete data for the process or None in the case of failure
+        """
+
+        try:
+            vad_start = vad.get_start()
+            vad_end = vad.get_end()
+        except AttributeError:
+            vollog.debug("Unable to find the starting/ending VPN member")
+            return
+
+        if maxsize > 0 and (vad_end - vad_start) > maxsize:
+            vollog.debug("Skip VAD dump {0:#x}-{1:#x} due to maxsize limit".format(vad_start, vad_end))
+            return
+
+        proc_id = "Unknown"
+        try:
+            proc_id = proc.UniqueProcessId
+            proc_layer_name = proc.add_process_layer()
+        except exceptions.InvalidAddressException as excp:
+            vollog.debug("Process {}: invalid address {} in layer {}".format(proc_id, excp.invalid_address,
+                                                                             excp.layer_name))
+            return None
+
+        proc_layer = context.layers[proc_layer_name]
+        file_name = "pid.{0}.vad.{1:#x}-{2:#x}.dmp".format(proc_id, vad_start, vad_end)
+        try:
+            file_handle = open_method(file_name)
+            chunk_size = 1024 * 1024 * 10
+            offset = vad_start
+            while offset < vad_end:
+                to_read = min(chunk_size, vad_end - offset)
+                data = proc_layer.read(offset, to_read, pad = True)
+                if not data:
+                    break
+                file_handle.write(data)
+                offset += to_read
+
+        except Exception as excp:
+            vollog.debug("Unable to dump VAD {}: {}".format(file_name, excp))
+            return
+
+        return file_handle
+
     def _generator(self, procs):
 
-        def passthrough(_: 'interfaces.objects.ObjectInterface') -> bool:
+        def passthrough(_: interfaces.objects.ObjectInterface) -> bool:
             return False
 
         filter_func = passthrough
         if self.config.get('address', None) is not None:
 
-            def filter_function(x: 'interfaces.objects.ObjectInterface') -> bool:
+            def filter_function(x: interfaces.objects.ObjectInterface) -> bool:
                 return x.get_start() not in [self.config['address']]
 
             filter_func = filter_function
 
         for proc in procs:
             process_name = utility.array_to_string(proc.ImageFileName)
+            proc_layer_name = proc.add_process_layer()
 
             for vad in self.list_vads(proc, filter_func = filter_func):
+
+                file_output = "Disabled"
+                if self.config['dump']:
+                    file_handle = self.vad_dump(self.context, proc, vad, self.open)
+                    file_output = "Error outputting file"
+                    if file_handle:
+                        file_handle.close()
+                        file_output = file_handle.preferred_filename
+
                 yield (0, (proc.UniqueProcessId, process_name, format_hints.Hex(vad.vol.offset),
                            format_hints.Hex(vad.get_start()), format_hints.Hex(vad.get_end()), vad.get_tag(),
                            vad.get_protection(
                                self.protect_values(self.context, self.config['primary'], self.config['nt_symbols']),
                                winnt_protections), vad.get_commit_charge(), vad.get_private_memory(),
-                           format_hints.Hex(vad.get_parent()), vad.get_file_name()))
+                           format_hints.Hex(vad.get_parent()), vad.get_file_name(), file_output))
 
     def run(self):
 
@@ -127,7 +209,7 @@ class VadInfo(interfaces.plugins.PluginInterface):
         return renderers.TreeGrid([("PID", int), ("Process", str), ("Offset", format_hints.Hex),
                                    ("Start VPN", format_hints.Hex), ("End VPN", format_hints.Hex), ("Tag", str),
                                    ("Protection", str), ("CommitCharge", int), ("PrivateMemory", int),
-                                   ("Parent", format_hints.Hex), ("File", str)],
+                                   ("Parent", format_hints.Hex), ("File", str), ("File output", str)],
                                   self._generator(
                                       pslist.PsList.list_processes(context = self.context,
                                                                    layer_name = self.config['primary'],

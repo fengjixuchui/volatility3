@@ -9,25 +9,27 @@ from Crypto.Hash import HMAC
 
 from volatility.framework import interfaces, renderers
 from volatility.framework.configuration import requirements
-from volatility.plugins.windows import hashdump, lsadump, poolscanner
+from volatility.framework.symbols.windows import versions
+from volatility.plugins.windows import hashdump, lsadump
 from volatility.plugins.windows.registry import hivelist
 
 
 class Cachedump(interfaces.plugins.PluginInterface):
     """Dumps lsa secrets from memory"""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
 
     @classmethod
     def get_requirements(cls):
-        return [requirements.TranslationLayerRequirement(name = 'primary',
-                                                         description = 'Memory layer for the kernel',
-                                                         architectures = ["Intel32", "Intel64"]),
-                requirements.SymbolTableRequirement(name = "nt_symbols",
-                                                    description = "Windows kernel symbols"),
-                requirements.PluginRequirement(name = 'hivelist', plugin = hivelist.HiveList, version = (1, 0, 0)),
-                requirements.PluginRequirement(name = 'lsadump', plugin = lsadump.Lsadump, version = (1, 0, 0))
-                ]
+        return [
+            requirements.TranslationLayerRequirement(name = 'primary',
+                                                     description = 'Memory layer for the kernel',
+                                                     architectures = ["Intel32", "Intel64"]),
+            requirements.SymbolTableRequirement(name = "nt_symbols", description = "Windows kernel symbols"),
+            requirements.PluginRequirement(name = 'hivelist', plugin = hivelist.HiveList, version = (1, 0, 0)),
+            requirements.PluginRequirement(name = 'lsadump', plugin = lsadump.Lsadump, version = (1, 0, 0))
+        ]
 
     def get_nlkm(self, sechive, lsakey, is_vista_or_later):
         return lsadump.Lsadump.get_secret_by_name(sechive, 'NL$KM', lsakey, is_vista_or_later)
@@ -43,7 +45,7 @@ class Cachedump(interfaces.plugins.PluginInterface):
             aes = AES.new(nlkm[16:32], AES.MODE_CBC, ch)
             data = ""
             for i in range(0, len(edata), 16):
-                buf = edata[i: i + 16]
+                buf = edata[i:i + 16]
                 if len(buf) < 16:
                     buf += (16 - len(buf)) * "\00"
                 data += aes.decrypt(buf)
@@ -58,8 +60,7 @@ class Cachedump(interfaces.plugins.PluginInterface):
         enc_data = cache_data[96:]
         return (uname_len, domain_len, domain_name_len, enc_data, ch)
 
-    def parse_decrypted_cache(self, dec_data, uname_len,
-                              domain_len, domain_name_len):
+    def parse_decrypted_cache(self, dec_data, uname_len, domain_len, domain_name_len):
         """Get the data from the cache and separate it into the username, domain name, and hash data"""
         uname_offset = 72
         pad = 2 * ((uname_len / 2) % 2)
@@ -81,9 +82,7 @@ class Cachedump(interfaces.plugins.PluginInterface):
         if not bootkey:
             raise ValueError('Unable to find bootkey')
 
-        is_vista_or_later = poolscanner.os_distinguisher(version_check = lambda x: x >= (6, 0),
-                                                         fallback_checks = [("KdCopyDataBlock", None, True)])
-        vista_or_later = is_vista_or_later(context = self.context, symbol_table = self.config['nt_symbols'])
+        vista_or_later = versions.is_vista_or_later(context = self.context, symbol_table = self.config['nt_symbols'])
 
         lsakey = lsadump.Lsadump.get_lsa_key(sechive, bootkey, vista_or_later)
         if not lsakey:
@@ -102,18 +101,16 @@ class Cachedump(interfaces.plugins.PluginInterface):
                 continue
 
             data = sechive.read(cache_item.Data + 4, cache_item.DataLength)
-            if data == None:
+            if data is None:
                 continue
-            (uname_len, domain_len, domain_name_len,
-             enc_data, ch) = self.parse_cache_entry(data)
+            (uname_len, domain_len, domain_name_len, enc_data, ch) = self.parse_cache_entry(data)
             # Skip if nothing in this cache entry
             if uname_len == 0 or len(ch) == 0:
                 continue
             dec_data = self.decrypt_hash(enc_data, nlkm, ch, not vista_or_later)
 
-            (username, domain, domain_name,
-             hashh) = self.parse_decrypted_cache(dec_data, uname_len,
-                                                 domain_len, domain_name_len)
+            (username, domain, domain_name, hashh) = self.parse_decrypted_cache(dec_data, uname_len, domain_len,
+                                                                                domain_name_len)
             yield (0, (username, domain, domain_name, hashh))
 
     def run(self):

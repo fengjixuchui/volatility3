@@ -12,10 +12,12 @@ User interfaces make use of the framework to:
 """
 import argparse
 import inspect
+import io
 import json
 import logging
 import os
 import sys
+import tempfile
 import traceback
 from typing import Dict, Type, Union, Any
 from urllib import parse, request
@@ -66,7 +68,7 @@ class MuteProgress(PrintedProgress):
         pass
 
 
-class CommandLine(interfaces.plugins.FileConsumerInterface):
+class CommandLine:
     """Constructs a command-line interface object for users to run plugins."""
 
     CLI_NAME = 'volatility'
@@ -85,7 +87,7 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
         """Executes the command line module, taking the system arguments,
         determining the plugin to run and then running it."""
 
-        volatility.framework.require_interface_version(1, 0, 0)
+        volatility.framework.require_interface_version(2, 0, 0)
 
         renderers = dict([(x.name.lower(), x) for x in framework.class_subclasses(text_renderer.CLIRenderer)])
 
@@ -296,7 +298,8 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
             if args.quiet:
                 progress_callback = MuteProgress()
 
-            constructed = plugins.construct_plugin(ctx, automagics, plugin, base_config_path, progress_callback, self)
+            constructed = plugins.construct_plugin(ctx, automagics, plugin, base_config_path, progress_callback,
+                                                   self.file_handler_class_factory())
 
             if args.write_config:
                 vollog.debug("Writing out configuration data to config.json")
@@ -351,16 +354,16 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
             general = "Volatility experienced a symbol-related issue:"
             detail = "{}{}{}: {}".format(excp.table_name, constants.BANG, excp.symbol_name, excp)
             caused_by = [
-                "An invalid symbol table"
-                "A plugin requesting a bad symbol"
-                "A plugin requesting a symbol from the wrong table"
+                "An invalid symbol table",
+                "A plugin requesting a bad symbol",
+                "A plugin requesting a symbol from the wrong table",
             ]
         elif isinstance(excp, exceptions.SymbolSpaceError):
             general = "Volatility experienced an issue related to a symbol table:"
             detail = "{}".format(excp)
             caused_by = [
-                "An invalid symbol table", "A plugin requesting a bad symbol"
-                "A plugin requesting a symbol from the wrong table"
+                "An invalid symbol table", "A plugin requesting a bad symbol",
+                                           "A plugin requesting a symbol from the wrong table"
             ]
         elif isinstance(excp, exceptions.LayerException):
             general = "Volatility experienced a layer-related issue: {}".format(excp.layer_name)
@@ -449,22 +452,86 @@ class CommandLine(interfaces.plugins.FileConsumerInterface):
                     extended_path = interfaces.configuration.path_join(config_path, requirement.name)
                     context.config[extended_path] = value
 
-    def consume_file(self, filedata: interfaces.plugins.FileInterface):
-        """Consumes a file as produced by a plugin."""
-        if self.output_dir is None:
-            raise TypeError("Output directory is not a string")
-        os.makedirs(self.output_dir, exist_ok = True)
+    def file_handler_class_factory(self, direct = True):
+        output_dir = self.output_dir
 
-        pref_name_array = filedata.preferred_filename.split('.')
-        filename, extension = os.path.join(self.output_dir, '.'.join(pref_name_array[:-1])), pref_name_array[-1]
-        output_filename = "{}.{}".format(filename, extension)
+        class CLIFileHandler(interfaces.plugins.FileHandlerInterface):
 
-        if not os.path.exists(output_filename):
-            with open(output_filename, "wb") as current_file:
-                current_file.write(filedata.data.getvalue())
-                vollog.log(logging.INFO, "Saved stored plugin file: {}".format(output_filename))
+            def _get_final_filename(self):
+                """Gets the final filename"""
+                if output_dir is None:
+                    raise TypeError("Output directory is not a string")
+                os.makedirs(output_dir, exist_ok = True)
+
+                pref_name_array = self.preferred_filename.split('.')
+                filename, extension = os.path.join(output_dir, '.'.join(pref_name_array[:-1])), pref_name_array[-1]
+                output_filename = "{}.{}".format(filename, extension)
+
+                counter = 1
+                while os.path.exists(output_filename):
+                    output_filename = "{}-{}.{}".format(filename, counter, extension)
+                    counter += 1
+                return output_filename
+
+        class CLIMemFileHandler(io.BytesIO, CLIFileHandler):
+            def __init__(self, filename: str):
+                io.BytesIO.__init__(self)
+                CLIFileHandler.__init__(self, filename)
+
+            def close(self):
+                # Don't overcommit
+                if self.closed:
+                    return
+
+                self.seek(0)
+
+                output_filename = self._get_final_filename()
+
+                with open(output_filename, "wb") as current_file:
+                    current_file.write(self.read())
+                    self._committed = True
+                    vollog.log(logging.INFO, "Saved stored plugin file: {}".format(output_filename))
+
+                super().close()
+
+        class CLIDirectFileHandler(CLIFileHandler):
+            def __init__(self, filename: str):
+                fd, self._name = tempfile.mkstemp(suffix = '.vol3', prefix = 'tmp_', dir = output_dir)
+                self._file = io.open(fd, mode = 'w+b')
+                CLIFileHandler.__init__(self, filename)
+                for item in dir(self._file):
+                    if not item.startswith('_') and not item in ['closed', 'close', 'mode', 'name']:
+                        setattr(self, item, getattr(self._file, item))
+
+            def __getattr__(self, item):
+                return getattr(self._file, item)
+
+            @property
+            def closed(self):
+                return self._file.closed
+
+            @property
+            def mode(self):
+                return self._file.mode
+
+            @property
+            def name(self):
+                return self._file.name
+
+            def close(self):
+                """Closes and commits the file (by moving the temporary file to the correct name"""
+                # Don't overcommit
+                if self._file.closed:
+                    return
+
+                self._file.close()
+                output_filename = self._get_final_filename()
+                os.rename(self._name, output_filename)
+
+        if direct:
+            return CLIDirectFileHandler
         else:
-            vollog.warning("Refusing to overwrite an existing file: {}".format(output_filename))
+            return CLIMemFileHandler
 
     def populate_requirements_argparse(self, parser: Union[argparse.ArgumentParser, argparse._ArgumentGroup],
                                        configurable: Type[interfaces.configuration.ConfigurableInterface]):

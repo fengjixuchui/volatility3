@@ -6,14 +6,13 @@ import collections.abc
 import datetime
 import functools
 import logging
-import struct
-from typing import Iterable, Iterator, Optional, Union, Dict, Tuple, List
+from typing import Iterable, Iterator, Optional, Union
 
 from volatility.framework import constants, exceptions, interfaces, objects, renderers, symbols
 from volatility.framework.layers import intel
 from volatility.framework.renderers import conversion
 from volatility.framework.symbols import generic
-from volatility.framework.symbols.windows.extensions import pool
+from volatility.framework.symbols.windows.extensions import pool, pe
 
 vollog = logging.getLogger(__name__)
 
@@ -30,7 +29,6 @@ class KSYSTEM_TIME(objects.StructType):
 
 class MMVAD_SHORT(objects.StructType):
     """A class that represents process virtual memory ranges.
-
     Each instance is a node in a binary tree structure and is pointed to
     by VadRoot.
     """
@@ -122,6 +120,21 @@ class MMVAD_SHORT(objects.StructType):
         elif self.has_member("Right"):
             return self.Right
 
+        # this is for windows 8 and 10
+        elif self.has_member("VadNode"):
+            if self.VadNode.has_member("RightChild"):
+                return self.VadNode.RightChild
+            if self.VadNode.has_member("Right"):
+                return self.VadNode.Right
+
+        # also for windows 8 and 10
+        elif self.has_member("Core"):
+            if self.Core.has_member("VadNode"):
+                if self.Core.VadNode.has_member("RightChild"):
+                    return self.Core.VadNode.RightChild
+                if self.Core.VadNode.has_member("Right"):
+                    return self.Core.VadNode.Right
+
         raise AttributeError("Unable to find the right child member")
 
     def get_left_child(self):
@@ -132,6 +145,21 @@ class MMVAD_SHORT(objects.StructType):
 
         elif self.has_member("Left"):
             return self.Left
+
+        # this is for windows 8 and 10
+        elif self.has_member("VadNode"):
+            if self.VadNode.has_member("LeftChild"):
+                return self.VadNode.LeftChild
+            if self.VadNode.has_member("Left"):
+                return self.VadNode.Left
+
+        # also for windows 8 and 10
+        elif self.has_member("Core"):
+            if self.Core.has_member("VadNode"):
+                if self.Core.VadNode.has_member("LeftChild"):
+                    return self.Core.VadNode.LeftChild
+                if self.Core.VadNode.has_member("Left"):
+                    return self.Core.VadNode.Left
 
         raise AttributeError("Unable to find the left child member")
 
@@ -294,7 +322,6 @@ class MMVAD(MMVAD_SHORT):
 class EX_FAST_REF(objects.StructType):
     """This is a standard Windows structure that stores a pointer to an object
     but also leverages the least significant bits to encode additional details.
-
     When dereferencing the pointer, we need to strip off the extra bits.
     """
 
@@ -356,12 +383,13 @@ class FILE_OBJECT(objects.StructType, pool.ExecutiveObject):
 
     def is_valid(self) -> bool:
         """Determine if the object is valid."""
-        return self.FileName.Length > 0 and self._context.layers[self.vol.layer_name].is_valid(self.FileName.Buffer)
+        return self.FileName.Length > 0 and self._context.layers[self.FileName.Buffer.vol.native_layer_name].is_valid(
+            self.FileName.Buffer)
 
     def file_name_with_device(self) -> Union[str, interfaces.renderers.BaseAbsentValue]:
         name = renderers.UnreadableValue()  # type: Union[str, interfaces.renderers.BaseAbsentValue]
 
-        if self._context.layers[self.vol.layer_name].is_valid(self.DeviceObject):
+        if self._context.layers[self.DeviceObject.vol.native_layer_name].is_valid(self.DeviceObject):
             try:
                 name = "\\Device\\{}".format(self.DeviceObject.get_device_name())
             except ValueError:
@@ -373,6 +401,12 @@ class FILE_OBJECT(objects.StructType, pool.ExecutiveObject):
             pass
 
         return name
+
+    def access_string(self):
+        ## Make a nicely formatted ACL string
+        return (('R' if self.ReadAccess else '-') + ('W' if self.WriteAccess else '-') +
+                ('D' if self.DeleteAccess else '-') + ('r' if self.SharedRead else '-') +
+                ('w' if self.SharedWrite else '-') + ('d' if self.SharedDelete else '-'))
 
 
 class KMUTANT(objects.StructType, pool.ExecutiveObject):
@@ -394,6 +428,27 @@ class ETHREAD(objects.StructType):
     def owning_process(self, kernel_layer: str = None) -> interfaces.objects.ObjectInterface:
         """Return the EPROCESS that owns this thread."""
         return self.ThreadsProcess.dereference(kernel_layer)
+
+    def get_cross_thread_flags(self) -> str:
+        dictCrossThreadFlags = {
+            'PS_CROSS_THREAD_FLAGS_TERMINATED': 0,
+            'PS_CROSS_THREAD_FLAGS_DEADTHREAD': 1,
+            'PS_CROSS_THREAD_FLAGS_HIDEFROMDBG': 2,
+            'PS_CROSS_THREAD_FLAGS_IMPERSONATING': 3,
+            'PS_CROSS_THREAD_FLAGS_SYSTEM': 4,
+            'PS_CROSS_THREAD_FLAGS_HARD_ERRORS_DISABLED': 5,
+            'PS_CROSS_THREAD_FLAGS_BREAK_ON_TERMINATION': 6,
+            'PS_CROSS_THREAD_FLAGS_SKIP_CREATION_MSG': 7,
+            'PS_CROSS_THREAD_FLAGS_SKIP_TERMINATION_MSG': 8
+        }
+
+        flags = self.CrossThreadFlags
+        stringCrossThreadFlags = ''
+        for flag in dictCrossThreadFlags:
+            if flags & 2 ** dictCrossThreadFlags[flag]:
+                stringCrossThreadFlags += '{} '.format(flag)
+
+        return stringCrossThreadFlags[:-1] if stringCrossThreadFlags else stringCrossThreadFlags
 
 
 class UNICODE_STRING(objects.StructType):
@@ -609,6 +664,36 @@ class EPROCESS(generic.GenericIntelProcess, pool.ExecutiveObject):
             # windows xp and 2003
             return self.VadRoot.dereference().cast("_MMVAD")
 
+    def environment_variables(self):
+        """Generator for environment variables. 
+
+        The PEB points to our env block - a series of null-terminated
+        unicode strings. Each string cannot be more than 0x7FFF chars. 
+        End of the list is a quad-null. 
+        """
+        context = self._context
+        process_space = self.add_process_layer()
+
+        try:
+            block = self.get_peb().ProcessParameters.Environment
+            try:
+                block_size = self.get_peb().ProcessParameters.EnvironmentSize
+            except AttributeError:  # Windows XP
+                block_size = self.get_peb().ProcessParameters.Length
+            envars = context.layers[process_space].read(block, block_size).decode("utf-16-le",
+                                                                                  errors = 'replace').split('\x00')[:-1]
+        except exceptions.InvalidAddressException:
+            return renderers.UnreadableValue()
+
+        for envar in envars:
+            split_index = envar.find('=')
+            env = envar[:split_index]
+            var = envar[split_index + 1:]
+
+            # Exlude parse problem with some types of env
+            if env and var:
+                yield env, var
+
 
 class LIST_ENTRY(objects.StructType, collections.abc.Iterable):
     """A class for double-linked lists on Windows."""
@@ -667,3 +752,123 @@ class LIST_ENTRY(objects.StructType, collections.abc.Iterable):
 
     def __iter__(self) -> Iterator[interfaces.objects.ObjectInterface]:
         return self.to_list(self.vol.parent.vol.type_name, self.vol.member_name)
+
+
+class TOKEN(objects.StructType):
+    """A class for process etoken object."""
+
+    def get_sids(self) -> Iterable[str]:
+        """Yield a sid for the current token object."""
+
+        if self.UserAndGroupCount < 0xFFFF:
+            layer_name = self.vol.layer_name
+            kvo = self._context.layers[layer_name].config["kernel_virtual_offset"]
+            symbol_table = self.get_symbol_table_name()
+            ntkrnlmp = self._context.module(symbol_table, layer_name = layer_name, offset = kvo)
+            UserAndGroups = ntkrnlmp.object(object_type = "array",
+                                            offset = self.UserAndGroups.dereference().vol.get("offset") - kvo,
+                                            subtype = ntkrnlmp.get_type("_SID_AND_ATTRIBUTES"),
+                                            count = self.UserAndGroupCount)
+            for sid_and_attr in UserAndGroups:
+                try:
+                    sid = sid_and_attr.Sid.dereference().cast("_SID")
+                    # catch invalid pointers (UserAndGroupCount is too high)
+                    if sid is None:
+                        return
+                    # this mimics the windows API IsValidSid
+                    if sid.Revision & 0xF != 1 or sid.SubAuthorityCount > 15:
+                        return
+                    id_auth = ""
+                    for i in sid.IdentifierAuthority.Value:
+                        id_auth = i
+                    SubAuthority = ntkrnlmp.object(object_type = "array",
+                                                   offset = sid.SubAuthority.vol.offset - kvo,
+                                                   subtype = ntkrnlmp.get_type("unsigned long"),
+                                                   count = int(sid.SubAuthorityCount))
+                    yield "S-" + "-".join(str(i) for i in (sid.Revision, id_auth) + tuple(SubAuthority))
+                except exceptions.InvalidAddressException:
+                    vollog.log(constants.LOGLEVEL_VVVV, "InvalidAddressException while parsing for token sid")
+
+    def privileges(self):
+        """Return a list of privileges for the current token object."""
+
+        try:
+            for priv_index in range(64):
+                yield (priv_index, bool(self.Privileges.Present & (2 ** priv_index)),
+                       bool(self.Privileges.Enabled & (2 ** priv_index)),
+                       bool(self.Privileges.EnabledByDefault & (2 ** priv_index)))
+        except AttributeError:  # Windows XP
+            if self.PrivilegeCount < 1024:
+                # This is a pointer to an array of _LUID_AND_ATTRIBUTES
+                for luid in self.Privileges.dereference().cast(
+                        "array",
+                        count = self.PrivilegeCount,
+                        subtype = self._context.symbol_space[self.get_symbol_table_name()].get_type(
+                            "_LUID_AND_ATTRIBUTES")):
+                    # The Attributes member is a flag
+                    enabled = luid.Attributes & 2 != 0
+                    default = luid.Attributes & 1 != 0
+                    yield luid.Luid.LowPart, True, enabled, default
+            else:
+                vollog.log(constants.LOGLEVEL_VVVV, "Broken Token Privileges.")
+
+
+class KTHREAD(objects.StructType):
+    """A class for thread control block objects."""
+
+    def get_state(self) -> str:
+        dictState = {
+            0: 'Initialized',
+            1: 'Ready',
+            2: 'Running',
+            3: 'Standby',
+            4: 'Terminated',
+            5: 'Waiting',
+            6: 'Transition',
+            7: 'DeferredReady',
+            8: 'GateWait'
+        }
+        return dictState.get(self.State, renderers.NotApplicableValue())
+
+    def get_wait_reason(self) -> str:
+        dictWaitReason = {
+            0: 'Executive',
+            1: 'FreePage',
+            2: 'PageIn',
+            3: 'PoolAllocation',
+            4: 'DelayExecution',
+            5: 'Suspended',
+            6: 'UserRequest',
+            7: 'WrExecutive',
+            8: 'WrFreePage',
+            9: 'WrPageIn',
+            10: 'WrPoolAllocation',
+            11: 'WrDelayExecution',
+            12: 'WrSuspended',
+            13: 'WrUserRequest',
+            14: 'WrEventPair',
+            15: 'WrQueue',
+            16: 'WrLpcReceive',
+            17: 'WrLpcReply',
+            18: 'WrVirtualMemory',
+            19: 'WrPageOut',
+            20: 'WrRendezvous',
+            21: 'Spare2',
+            22: 'Spare3',
+            23: 'Spare4',
+            24: 'Spare5',
+            25: 'Spare6',
+            26: 'WrKernel',
+            27: 'WrResource',
+            28: 'WrPushLock',
+            29: 'WrMutex',
+            30: 'WrQuantumEnd',
+            31: 'WrDispatchInt',
+            32: 'WrPreempted',
+            33: 'WrYieldExecution',
+            34: 'WrFastMutex',
+            35: 'WrGuardedMutex',
+            36: 'WrRundown',
+            37: 'MaximumWaitReason'
+        }
+        return dictWaitReason.get(self.WaitReason, renderers.NotApplicableValue())

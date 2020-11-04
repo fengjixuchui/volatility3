@@ -24,6 +24,7 @@ except ImportError:
 class Handles(interfaces.plugins.PluginInterface):
     """Lists process open handles."""
 
+    _required_framework_version = (2, 0, 0)
     _version = (1, 0, 0)
 
     def __init__(self, *args, **kwargs):
@@ -45,7 +46,7 @@ class Handles(interfaces.plugins.PluginInterface):
                                          element_type = int,
                                          description = "Process IDs to include (all other processes are excluded)",
                                          optional = True),
-            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0))
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0))
         ]
 
     def _decode_pointer(self, value, magic):
@@ -89,8 +90,8 @@ class Handles(interfaces.plugins.PluginInterface):
                 if not has_capstone:
                     raise AttributeError("Unable to find the SAR value for decoding handle table pointers")
                 else:
-                    raise exceptions.MissingModuleException(
-                        "Unable to find the SAR value for decoding handle table pointers", module = "capstone")
+                    raise exceptions.MissingModuleException("capstone",
+                                                            "Unable to find the SAR value for decoding handle table pointers")
 
             offset = self._decode_pointer(handle_table_entry.LowValue, magic)
             # print("LowValue: {0:#x} Magic: {1:#x} Offset: {2:#x}".format(handle_table_entry.InfoTable, magic, offset))

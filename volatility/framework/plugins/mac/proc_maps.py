@@ -12,13 +12,15 @@ from volatility.plugins.mac import pslist
 class Maps(interfaces.plugins.PluginInterface):
     """Lists process memory ranges that potentially contain injected code."""
 
+    _required_framework_version = (2, 0, 0)
+
     @classmethod
     def get_requirements(cls):
         return [
             requirements.TranslationLayerRequirement(name = 'primary',
                                                      description = 'Memory layer for the kernel',
                                                      architectures = ["Intel32", "Intel64"]),
-            requirements.SymbolTableRequirement(name = "darwin", description = "Linux kernel symbols"),
+            requirements.SymbolTableRequirement(name = "darwin", description = "Mac kernel"),
             requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
             requirements.ListRequirement(name = 'pid',
                                          description = 'Filter on specific process IDs',

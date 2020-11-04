@@ -3,6 +3,7 @@
 #
 import binascii
 import code
+import io
 import random
 import string
 import struct
@@ -24,6 +25,7 @@ except ImportError:
 
 class Volshell(interfaces.plugins.PluginInterface):
     """Shell environment to directly interact with a memory image."""
+    _required_framework_version = (2, 0, 0)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -263,10 +265,6 @@ class Volshell(interfaces.plugins.PluginInterface):
         else:
             return hex(value.vol.offset)
 
-    def consume_file(self, file: interfaces.plugins.FileInterface) -> None:
-        """Dummy file consumer to satisfy the interface"""
-        pass
-
     def generate_treegrid(self, plugin: Type[interfaces.plugins.PluginInterface],
                           **kwargs) -> Optional[interfaces.renderers.TreeGrid]:
         """Generates a TreeGrid based on a specific plugin passing in kwarg configuration values"""
@@ -281,7 +279,7 @@ class Volshell(interfaces.plugins.PluginInterface):
             self.config[path_join(plugin_config_suffix, plugin.__name__, name)] = value
 
         try:
-            constructed = plugins.construct_plugin(self.context, [], plugin, plugin_path, None, NullFileConsumer())
+            constructed = plugins.construct_plugin(self.context, [], plugin, plugin_path, None, NullFileHandler())
             return constructed.run()
         except exceptions.UnsatisfiedException as excp:
             print("Unable to validate the plugin requirements: {}\n".format([x for x in excp.unsatisfied]))
@@ -320,9 +318,17 @@ class Volshell(interfaces.plugins.PluginInterface):
             print(" " * (longest_offset - len_offset), hex(symbol.address), " ", symbol.name)
 
 
-class NullFileConsumer(interfaces.plugins.FileConsumerInterface):
-    """Null FileConsumer that swallows files whole"""
+class NullFileHandler(io.BytesIO, interfaces.plugins.FileHandlerInterface):
+    """Null FileHandler that swallows files whole without consuming memory"""
 
-    def consume_file(self, file: interfaces.plugins.FileInterface) -> None:
-        """Dummy file consumer to satisfy the FileConsumerInterface"""
+    def __init__(self, preferred_name: str):
+        interfaces.plugins.FileHandlerInterface.__init__(self, preferred_name)
+        super().__init__()
+
+    def writelines(self, lines):
+        """Dummy method"""
         pass
+
+    def write(self, data):
+        """Dummy method"""
+        return len(data)
