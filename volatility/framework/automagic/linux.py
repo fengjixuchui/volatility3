@@ -9,7 +9,6 @@ from volatility.framework import interfaces, constants
 from volatility.framework.automagic import symbol_cache, symbol_finder
 from volatility.framework.layers import intel, scanners
 from volatility.framework.symbols import linux
-from volatility.framework.objects import utility
 
 vollog = logging.getLogger(__name__)
 
@@ -85,6 +84,7 @@ class LinuxIntelStacker(interfaces.automagic.StackerLayerInterface):
             if layer and dtb:
                 vollog.debug("DTB was found at: 0x{:0x}".format(dtb))
                 return layer
+        vollog.debug("No suitable linux banner could be matched")
         return None
 
     @classmethod

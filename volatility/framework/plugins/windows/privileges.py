@@ -1,14 +1,13 @@
 # This file is Copyright 2019 Volatility Foundation and licensed under the Volatility Software License 1.0
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 
+import json
 import logging
-import os, json
-from typing import Callable, List, Generator, Iterable
+import os
+from typing import List
 
 from volatility.framework import renderers, interfaces, objects, exceptions, constants
 from volatility.framework.configuration import requirements
-from volatility.framework.objects import utility
-from volatility.framework.renderers import format_hints
 from volatility.plugins.windows import pslist
 
 vollog = logging.getLogger(__name__)
@@ -18,6 +17,7 @@ class Privs(interfaces.plugins.PluginInterface):
     """Lists process token privileges"""
 
     _version = (1, 0, 0)
+    _required_framework_version = (2, 0, 0)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -48,7 +48,7 @@ class Privs(interfaces.plugins.PluginInterface):
                                          description = 'Filter on specific process IDs',
                                          element_type = int,
                                          optional = True),
-            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
         ]
 
     def _generator(self, procs):

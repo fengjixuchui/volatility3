@@ -2,22 +2,21 @@
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 
-import logging
-
 from typing import Iterable, Callable, Tuple
 
-from volatility.framework import renderers, interfaces, constants, exceptions, contexts
+from volatility.framework import renderers, interfaces, contexts
 from volatility.framework.configuration import requirements
 from volatility.framework.objects import utility
+from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import mac
 from volatility.plugins.mac import lsmod
-from volatility.framework.renderers import format_hints
 
 
 class Kauth_scopes(interfaces.plugins.PluginInterface):
     """ Lists kauth scopes and their status """
 
     _version = (1, 0, 0)
+    _required_framework_version = (2, 0, 0)
 
     @classmethod
     def get_requirements(cls):
@@ -37,8 +36,8 @@ class Kauth_scopes(interfaces.plugins.PluginInterface):
                           darwin_symbols: str,
                           filter_func: Callable[[int], bool] = lambda _: False) -> \
             Iterable[Tuple[interfaces.objects.ObjectInterface,
-                          interfaces.objects.ObjectInterface,
-                          interfaces.objects.ObjectInterface]]:
+                           interfaces.objects.ObjectInterface,
+                           interfaces.objects.ObjectInterface]]:
         """
         Enumerates the registered kauth scopes and yields each object
         Uses smear-safe enumeration API

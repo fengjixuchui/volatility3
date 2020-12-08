@@ -5,7 +5,6 @@
 import collections
 import logging
 import struct
-from collections import abc
 from typing import Any, ClassVar, Dict, List, Iterable, Optional, Tuple, Type, Union as TUnion, overload
 
 from volatility.framework import interfaces, constants
@@ -438,6 +437,14 @@ class Enumeration(interfaces.objects.ObjectInterface, int):
 
         self._vol['base_type'] = base_type
 
+    def __eq__(self, other):
+        """An enumeration must be equivalent to its value, even if the other value is not an enumeration"""
+        return int(self) == other
+
+    def __hash__(self):
+        """Enumerations must be hashed as equivalent to their integer counterparts"""
+        return super().__hash__()
+
     @classmethod
     def _generate_inverse_choices(cls, choices: Dict[str, int]) -> Dict[int, str]:
         """Generates the inverse choices for the object."""
@@ -513,7 +520,7 @@ class Enumeration(interfaces.objects.ObjectInterface, int):
                     template.update_vol(base_type = new_child)
 
 
-class Array(interfaces.objects.ObjectInterface, abc.Sequence):
+class Array(interfaces.objects.ObjectInterface, collections.abc.Sequence):
     """Object which can contain a fixed number of an object type."""
 
     def __init__(self,
@@ -692,7 +699,7 @@ class AggregateType(interfaces.objects.ObjectInterface):
             if isinstance(cls, agg_type):
                 agg_name = agg_type.__name__
 
-        assert isinstance(members, abc.Mapping)
+        assert isinstance(members, collections.abc.Mapping)
         "{} members parameter must be a mapping: {}".format(agg_name, type(members))
         assert all([(isinstance(member, tuple) and len(member) == 2) for member in members.values()])
         "{} members must be a tuple of relative_offsets and templates".format(agg_name)

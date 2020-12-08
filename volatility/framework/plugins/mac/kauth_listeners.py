@@ -2,20 +2,18 @@
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 
-import logging
-
-from typing import Iterable, Callable, Tuple
-
-from volatility.framework import renderers, interfaces, constants, exceptions, contexts
+from volatility.framework import renderers, interfaces, contexts
 from volatility.framework.configuration import requirements
 from volatility.framework.objects import utility
+from volatility.framework.renderers import format_hints
 from volatility.framework.symbols import mac
 from volatility.plugins.mac import lsmod, kauth_scopes
-from volatility.framework.renderers import format_hints
 
 
 class Kauth_listeners(interfaces.plugins.PluginInterface):
     """ Lists kauth listeners and their status """
+
+    _required_framework_version = (2, 0, 0)
 
     @classmethod
     def get_requirements(cls):

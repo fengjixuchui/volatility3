@@ -13,7 +13,7 @@ once a layer successfully stacks on top of the existing layers, it is removed fr
 import logging
 import sys
 import traceback
-from typing import List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple, Type
 
 from volatility import framework
 from volatility.framework import interfaces, constants
@@ -38,7 +38,7 @@ class LayerStacker(interfaces.automagic.AutomagicInterface):
     # Most important automagic, must happen first!
     priority = 10
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._cached = None
 
@@ -221,12 +221,11 @@ class LayerStacker(interfaces.automagic.AutomagicInterface):
                     context.config[child_config_path] = layer_name
                     if not requirement.unsatisfied(context, config_path):
                         return child_config_path, layer_name
+                # Clean-up to restore the config
+                if original_setting:
+                    context.config[child_config_path] = original_setting
                 else:
-                    # Clean-up to restore the config
-                    if original_setting:
-                        context.config[child_config_path] = original_setting
-                    else:
-                        del context.config[child_config_path]
+                    del context.config[child_config_path]
             else:
                 return child_config_path, context.config.get(child_config_path, None)
         for req_name, req in requirement.requirements.items():
@@ -246,7 +245,7 @@ class LayerStacker(interfaces.automagic.AutomagicInterface):
         ]
 
 
-def choose_os_stackers(plugin):
+def choose_os_stackers(plugin: Type[interfaces.plugins.PluginInterface]) -> List[str]:
     """Identifies the stackers that should be run, based on the plugin (and thus os) provided"""
     plugin_first_level = plugin.__module__.split('.')[2]
 

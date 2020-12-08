@@ -11,27 +11,18 @@ import functools
 import logging
 import math
 import multiprocessing
+import multiprocessing.managers
 import threading
 import traceback
 import types
 from abc import ABCMeta, abstractmethod
-from multiprocessing import managers
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 from volatility.framework import constants, exceptions, interfaces
 
 vollog = logging.getLogger(__name__)
 
-IMPORTED_MAGIC = False
-try:
-    import magic
-
-    IMPORTED_MAGIC = True
-    vollog.debug("Imported python-magic, autodetecting compressed files based on content")
-except ImportError:
-    pass
-
-ProgressValue = Union['DummyProgress', managers.ValueProxy]
+ProgressValue = Union['DummyProgress', multiprocessing.managers.ValueProxy]
 IteratorValue = Tuple[List[Tuple[str, int, int]], int]
 
 
@@ -231,7 +222,6 @@ class DataLayerInterface(interfaces.configuration.ConfigurableInterface, metacla
         if progress_callback is not None and not callable(progress_callback):
             raise TypeError("Progress_callback is not callable")
 
-        scanner = scanner
         scanner.context = context
         scanner.layer_name = self.name
 
@@ -541,6 +531,9 @@ class LayerContainer(collections.abc.Mapping):
         """
         return self[layer].read(offset, length, pad)
 
+    def __eq__(self, other):
+        return dict(self) == dict(other)
+
     def write(self, layer: str, offset: int, data: bytes) -> None:
         """Writes to a particular layer at offset for length bytes."""
         self[layer].write(offset, data)
@@ -616,5 +609,5 @@ class LayerContainer(collections.abc.Mapping):
 class DummyProgress(object):
     """A class to emulate Multiprocessing/threading Value objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.value = 0

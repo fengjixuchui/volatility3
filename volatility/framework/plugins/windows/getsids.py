@@ -29,6 +29,7 @@ class GetSIDs(interfaces.plugins.PluginInterface):
     """Print the SIDs owning each process"""
 
     _version = (1, 0, 0)
+    _required_framework_version = (2, 0, 0)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -60,7 +61,7 @@ class GetSIDs(interfaces.plugins.PluginInterface):
                                          description = 'Filter on specific process IDs',
                                          element_type = int,
                                          optional = True),
-            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (1, 0, 0)),
+            requirements.PluginRequirement(name = 'pslist', plugin = pslist.PsList, version = (2, 0, 0)),
             requirements.PluginRequirement(name = 'hivelist', plugin = hivelist.HiveList, version = (1, 0, 0))
         ]
 

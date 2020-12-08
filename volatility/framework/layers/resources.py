@@ -13,7 +13,7 @@ import ssl
 import urllib.parse
 import urllib.request
 import zipfile
-from typing import Optional, Any
+from typing import Optional, Any, IO
 from urllib import error
 
 from volatility import framework
@@ -27,7 +27,8 @@ except ImportError:
     HAS_MAGIC = False
 
 try:
-    import smb.SMBHandler
+    # Import so that the handler is found by the framework.class_subclasses callc
+    import smb.SMBHandler  # lgtm [py/unused-import]
 except ImportError:
     pass
 
@@ -37,7 +38,7 @@ vollog = logging.getLogger(__name__)
 #   fix this
 
 
-def cascadeCloseFile(new_fp, original_fp):
+def cascadeCloseFile(new_fp: IO[bytes], original_fp: IO[bytes]) -> IO[bytes]:
     """Really horrible solution for ensuring files aren't left open
 
     Args:
@@ -155,9 +156,7 @@ class ResourceAccessor(object):
                     IMPORTED_MAGIC = True
                     # This is because python-magic and file provide a magic module
                     # Only file's python has magic.detect_from_fobj
-                except AttributeError:
-                    pass
-                except:
+                except (AttributeError, IOError):
                     pass
 
                 if detected:

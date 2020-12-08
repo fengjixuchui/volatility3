@@ -183,13 +183,12 @@ class VadInfo(interfaces.plugins.PluginInterface):
 
         for proc in procs:
             process_name = utility.array_to_string(proc.ImageFileName)
-            proc_layer_name = proc.add_process_layer()
 
             for vad in self.list_vads(proc, filter_func = filter_func):
 
                 file_output = "Disabled"
                 if self.config['dump']:
-                    file_handle = self.vad_dump(self.context, proc, vad, self.open)
+                    file_handle = self.vad_dump(self.context, proc, vad, self.open, self.config['maxsize'])
                     file_output = "Error outputting file"
                     if file_handle:
                         file_handle.close()

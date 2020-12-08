@@ -2,11 +2,9 @@
 # which is available at https://www.volatilityfoundation.org/license/vsl-v1.0
 #
 
-import logging
-
 from typing import Iterable, Callable, Tuple
 
-from volatility.framework import renderers, interfaces, constants, exceptions, contexts
+from volatility.framework import renderers, interfaces, exceptions, contexts
 from volatility.framework.configuration import requirements
 from volatility.framework.objects import utility
 from volatility.framework.symbols import mac
@@ -15,6 +13,8 @@ from volatility.plugins.mac import pslist
 
 class Kevents(interfaces.plugins.PluginInterface):
     """ Lists event handlers registered by processes """
+
+    _required_framework_version = (2, 0, 0)
 
     event_types = {
         1: "EVFILT_READ",
@@ -76,7 +76,7 @@ class Kevents(interfaces.plugins.PluginInterface):
     def _walk_klist_array(cls, kernel, fdp, array_pointer_member, array_size_member):
         """
         Convience wrapper for walking an array of lists of kernel events
-        Handles invalid address references 
+        Handles invalid address references
         """
         try:
             klist_array_pointer = getattr(fdp, array_pointer_member)

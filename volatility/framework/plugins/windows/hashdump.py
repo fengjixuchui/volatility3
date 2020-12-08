@@ -168,15 +168,12 @@ class Hashdump(interfaces.plugins.PluginInterface):
                 enc_lm_hash = sam_data[lm_offset + 0x04:lm_offset + 0x14]
                 lmhash = cls.decrypt_single_hash(rid, hbootkey, enc_lm_hash, cls.almpassword)
         elif lm_revision == b'\x02':
-            lm_exists = lm_len == 56
             if lm_len == 56:
                 lm_salt = sam_data[lm_offset + 4:lm_offset + 20]
                 enc_lm_hash = sam_data[lm_offset + 20:lm_offset + 52]
                 lmhash = cls.decrypt_single_salted_hash(rid, hbootkey, enc_lm_hash, cls.almpassword, lm_salt)
 
         # NT hash decryption
-        nt_len = unpack("<L", sam_data[0xac:0xb0])[0]
-
         nthash = None
         nt_revision = sam_data[nt_offset + 2:nt_offset + 3]
         if nt_revision == b'\x01':
